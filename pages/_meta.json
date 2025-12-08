@@ -2,6 +2,9 @@
   "index": "Introduction",
   "another": "Another Page",
   "advanced": "Advanced (A Folder)",
+  "html": "HTML",
+  "css": "CSS",
+  "gitlab-cicd": "Gitlab CI/CD",
   "about": {
     "title": "About",
     "type": "page"

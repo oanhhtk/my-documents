@@ -1,0 +1,67 @@
+# Section 1: Introduction to GitLab CI/CD. Fundamental CI/CD concepts & DevOps
+
+- [1. Introduction to the GitLab CI/CD course](#introduction)
+- [2. What is GitLab CI/CD?](#what-is-gitlab-cicd)
+- [3. GitLab.com account registration](#registration)
+- [4. Verifying your GitLab account](#verification)
+- [5. What is a pipeline?](#what-is-a-pipeline)
+- [6. Your first pipeline](#your-first-pipeline)
+
+---
+
+## Introduction
+
+Khóa học giới thiệu GitLab CI/CD, giúp người học tự động hóa quy trình build, test và deploy. Giảng viên Valentin giải thích dễ hiểu, tập trung vào giảm thao tác thủ công bằng automation. Nội dung bắt đầu từ kiến thức cơ bản, kèm ví dụ thực hành và áp dụng được cho nhiều ngôn ngữ/framework. Kết thúc khóa học, học viên có thể tự xây dựng pipeline CI/CD hoàn chỉnh.
+
+## What is GitLab CI/CD?
+
+GitLab CI/CD là công cụ tự động hóa trong GitLab giúp build, test và deploy phần mềm. Nó hoạt động như “trợ lý robot”, chạy các bước tự động qua pipeline để giảm lỗi và tiết kiệm thời gian. Hệ thống liên tục kiểm tra mã nguồn mỗi khi có thay đổi, đảm bảo phát hiện lỗi sớm. Khóa học tập trung vào nền tảng DevOps cho người mới, cung cấp kiến thức và kỹ năng để tự xây dựng pipeline cho bất kỳ công nghệ nào.
+
+## Registration
+
+GitLab.com Account Registration
+To get started with GitLab CI/CD, you will first need to register for a GitLab.com account.
+...
+
+## Verification
+
+- After registering, check your email inbox for a verification email from GitLab.
+  ...
+
+## What is a pipeline?
+
+Dưới đây là phần giải thích dạng gạch đầu dòng, ngắn gọn và dễ hiểu:
+
+- **Pipeline là gì?**  
+  Một chuỗi bước tự động giúp build, test và deploy phần mềm.
+
+- **Ví dụ dễ hiểu (Analogies):**  
+  Giống như **dây chuyền lắp ráp ô tô** – mỗi công đoạn phải hoàn thành trước khi sang bước tiếp theo.
+
+- **Đặc điểm chính của pipeline:**
+
+  - Các bước chạy **tuần tự** nếu phụ thuộc nhau.
+  - Các bước có thể chạy **song song** nếu độc lập.
+
+- **Jobs trong pipeline:**
+
+  - Được định nghĩa trong file **`.gitlab-ci.yml`**.
+  - Viết bằng cú pháp **YAML** để mô tả từng nhiệm vụ.
+
+- **Khi nào pipeline chạy?**
+
+  - Khi có thay đổi trong repository (commit/push).
+  - GitLab sẽ tự động kích hoạt pipeline.
+
+- **Thành phần vận hành:**
+
+  - **GitLab Server:** quản lý, theo dõi, hiển thị kết quả pipeline.
+  - **GitLab Runner:** máy thực thi các job trong pipeline.
+
+- **Mục tiêu của pipeline:**  
+  Đảm bảo phần mềm được build – test – triển khai một cách tự động, ổn định và chất lượng.
+
+## Your first pipeline
+
+- Resource: [GitLab Sign Up](https://medium.com/devops-with-valentine/setup-gitlab-ci-runner-with-docker-executor-on-windows-10-11-c58dafba9191?sk=b550a70c0a7a60f1a3250a53145a3541)
+- Resource: [Configure GitLab CI Runner with Docker executor using AWS EC2](https://www.youtube.com/watch?v=HGJWMTNeYqIConfigure)
