@@ -9,26 +9,15 @@
 
 ---
 
-## Introduction
+## 🔮 Introduction
 
 Khóa học giới thiệu GitLab CI/CD, giúp người học tự động hóa quy trình build, test và deploy. Giảng viên Valentin giải thích dễ hiểu, tập trung vào giảm thao tác thủ công bằng automation. Nội dung bắt đầu từ kiến thức cơ bản, kèm ví dụ thực hành và áp dụng được cho nhiều ngôn ngữ/framework. Kết thúc khóa học, học viên có thể tự xây dựng pipeline CI/CD hoàn chỉnh.
 
-## What is GitLab CI/CD?
+## ⚙️ What is GitLab CI/CD?
 
 GitLab CI/CD là công cụ tự động hóa trong GitLab giúp build, test và deploy phần mềm. Nó hoạt động như “trợ lý robot”, chạy các bước tự động qua pipeline để giảm lỗi và tiết kiệm thời gian. Hệ thống liên tục kiểm tra mã nguồn mỗi khi có thay đổi, đảm bảo phát hiện lỗi sớm. Khóa học tập trung vào nền tảng DevOps cho người mới, cung cấp kiến thức và kỹ năng để tự xây dựng pipeline cho bất kỳ công nghệ nào.
 
-## Registration
-
-GitLab.com Account Registration
-To get started with GitLab CI/CD, you will first need to register for a GitLab.com account.
-...
-
-## Verification
-
-- After registering, check your email inbox for a verification email from GitLab.
-  ...
-
-## What is a pipeline?
+## ⌇ What is a pipeline?
 
 Dưới đây là phần giải thích dạng gạch đầu dòng, ngắn gọn và dễ hiểu:
 
@@ -61,7 +50,82 @@ Dưới đây là phần giải thích dạng gạch đầu dòng, ngắn gọn 
 - **Mục tiêu của pipeline:**  
   Đảm bảo phần mềm được build – test – triển khai một cách tự động, ổn định và chất lượng.
 
-## Your first pipeline
+## 🪃 Your first pipeline
 
-- Resource: [GitLab Sign Up](https://medium.com/devops-with-valentine/setup-gitlab-ci-runner-with-docker-executor-on-windows-10-11-c58dafba9191?sk=b550a70c0a7a60f1a3250a53145a3541)
-- Resource: [Configure GitLab CI Runner with Docker executor using AWS EC2](https://www.youtube.com/watch?v=HGJWMTNeYqIConfigure)
+Creating a Simple CI/CD Pipeline in GitLab  
+_A car assembly line analogy for understanding pipelines_
+
+### 1. Introduction to CI/CD Pipeline
+
+- A **CI/CD pipeline** is a series of automated steps such as **build**, **test**, and **deploy**.
+- GitLab executes these steps automatically whenever changes are pushed.
+- The pipeline flow is compared to a **car assembly line**, where each job performs its own task.
+
+---
+
+### 2. Creating a New GitLab Project
+
+- Project name used in the lecture: **`car assembly`**.
+- Key points while creating a project:
+  - Set **project visibility** (private, internal, public).
+  - Initialize repository with a **README** file for convenience.
+
+---
+
+### 3. Using the Web IDE
+
+- Open GitLab’s **Web IDE** to start editing files.
+- Create a new file named **`.gitlab-ci.yml`**, which defines the pipeline.
+- The pipeline is written in **YAML format**, requiring careful indentation.
+
+---
+
+### 4. Defining Jobs in GitLab CI/CD
+
+- A **job** = one task in the pipeline (similar to one station in a car assembly line).
+- Instructor creates the job:
+
+### `build_car` : Job name (Example: `build`, `test`, `deploy`)
+
+- In a pipeline, every job is like a station in the car assembly line.
+
+- Example .gitlab-ci.yml
+
+- Jobs run inside **Docker containers**.
+- Docker image used:
+
+  ```yaml
+  build_car:
+    # Choosing a lightweight Docker image
+    image: alpine # Alpine Linux is chosen because it is minimal and fast.
+    # Write the script for the job
+    script:
+      - echo "Starting car assembly"
+      - mkdir build # mkdir → creates a new directory
+      - touch build/car.txt # touch → creates an empty file
+      - echo "This is a car file" > build/car.txt # echo → prints messages
+  ```
+
+  The instructor emphasizes correct YAML indentation, or the pipeline will fail.
+
+### Explanation of Commands Used
+
+- `build_car`: — Job name
+
+- This is the identifier of the job.
+
+- You can name jobs anything you want (build, test, deploy, etc.), but meaningful names are recommended.
+
+- In a pipeline, every job is like a station in the car assembly line.
+
+- `image`: alpine — Docker image to run the job
+
+- Tells the runner to create a Docker container using the alpine image.
+
+- Alpine is a lightweight Linux distribution commonly used for simple tasks.
+
+- All commands in script will run inside this container.
+
+- Note: If your runner does NOT use Docker (example: Shell runner), the image field will be ignored.
+
+  - `script`: — Commands to execute
