@@ -1,19 +1,21 @@
 # Section 1: Introduction to GitLab CI/CD. Fundamental CI/CD concepts & DevOps
 
-- [1. Introduction to the GitLab CI/CD course](#introduction)
-- [2. What is GitLab CI/CD?](#what-is-gitlab-cicd)
-- [3. GitLab.com account registration](#registration)
+- [1. Introduction to the GitLab CI/CD course](#-introduction)
+- [2. What is GitLab CI/CD?](#%EF%B8%8Fwhat-is-gitlab-cicd)
+- [3. GitLab.com account registration](#-registration)
 - [4. Verifying your GitLab account](#verification)
 - [5. What is a pipeline?](#what-is-a-pipeline)
 - [6. Your first pipeline](#your-first-pipeline)
+- [7. Adding pipeline stages](#adding-pipeline-stages)
+- [8. GitLab CI/CD architecture](#gitlab-cicd-architecture)
 
----
+--- title: "Section 1: Introduction to GitLab CI/CD. Fundamental CI/CD concepts & DevOps"
 
-## 🔮 Introduction
+## 🔮Introduction
 
 Khóa học giới thiệu GitLab CI/CD, giúp người học tự động hóa quy trình build, test và deploy. Giảng viên Valentin giải thích dễ hiểu, tập trung vào giảm thao tác thủ công bằng automation. Nội dung bắt đầu từ kiến thức cơ bản, kèm ví dụ thực hành và áp dụng được cho nhiều ngôn ngữ/framework. Kết thúc khóa học, học viên có thể tự xây dựng pipeline CI/CD hoàn chỉnh.
 
-## ⚙️ What is GitLab CI/CD?
+## ⚙️What is GitLab CI/CD?
 
 GitLab CI/CD là công cụ tự động hóa trong GitLab giúp build, test và deploy phần mềm. Nó hoạt động như “trợ lý robot”, chạy các bước tự động qua pipeline để giảm lỗi và tiết kiệm thời gian. Hệ thống liên tục kiểm tra mã nguồn mỗi khi có thay đổi, đảm bảo phát hiện lỗi sớm. Khóa học tập trung vào nền tảng DevOps cho người mới, cung cấp kiến thức và kỹ năng để tự xây dựng pipeline cho bất kỳ công nghệ nào.
 
@@ -85,9 +87,9 @@ _A car assembly line analogy for understanding pipelines_
 - A **job** = one task in the pipeline (similar to one station in a car assembly line).
 - Instructor creates the job:
 
-### `build_car` : Job name (Example: `build`, `test`, `deploy`)
+  - `build_car` : Job name (Example: `build`, `test`, `deploy`)
 
-- In a pipeline, every job is like a station in the car assembly line.
+  - In a pipeline, every job is like a station in the car assembly line.
 
 - Example .gitlab-ci.yml
 
@@ -108,7 +110,7 @@ _A car assembly line analogy for understanding pipelines_
 
   The instructor emphasizes correct YAML indentation, or the pipeline will fail.
 
-### Explanation of Commands Used
+---Explanation of Commands Used: ---
 
 - `build_car`: — Job name
 
@@ -129,3 +131,205 @@ _A car assembly line analogy for understanding pipelines_
 - Note: If your runner does NOT use Docker (example: Shell runner), the image field will be ignored.
 
   - `script`: — Commands to execute
+
+## Adding pipeline stages
+
+In Lesson 8, _“Adding pipeline stages,”_ the instructor goes deeper into how CI/CD pipelines work in GitLab. The lesson focuses on improving pipeline structure, automating checks, understanding job isolation, and using artifacts to pass files between jobs.
+
+---
+
+### 1. Displaying File Contents
+
+- Using the `cat` command to display file contents in the job logs.
+  ```yaml
+  test_car:
+    image: alpine
+    script:
+      - echo "Testing car assembly"
+      - cat build/car.txt # Display the contents of car.txt
+  ```
+- This helps verify that the previous job created the file correctly.
+
+### 2. Automating File Checks
+
+- A new job named `test_car` is introduced.
+- The job employs commands like `test` to confirm the existence of `car.txt` and `grep` to search for specific contents within the file.
+- This job is crucial for automating the verification process.
+
+  ```yaml
+  test_car:
+    image: alpine
+    script:
+      - echo "Testing car assembly"
+      - test -f build/car.txt # Check if car.txt exists
+      - grep "This is a car file" build/car.txt # Search for specific content
+  ```
+
+### 3. Pipeline Execution Analysis
+
+- By default, GitLab runs jobs in parallel unless specified otherwise.
+- To enhance the pipeline logic, stages—like build and test—are specifically defined
+
+```yaml
+stages:
+  - build
+  - test
+```
+
+- Then each job is assigned to a stage:
+
+```yaml
+build_car:
+  stage: build
+
+test_car:
+  stage: test
+```
+
+=> This ensures:
+`build_car` runs first
+
+`test_car` runs only after build_car finishes successfully
+
+- This ensures jobs run sequentially instead of simultaneously, allowing for a more orderly process.
+
+  ```yaml
+  stages: # Defining pipeline stages, the order matters, from top to bottom
+    - build
+    - test
+
+  build_car:
+    stage: build # Assigning the job to the 'build' stage
+    image: alpine
+    script:
+      - echo "Starting car assembly"
+      - mkdir build
+      - touch build/car.txt
+      - echo "This is a car file" > build/car.txt
+
+  test_car:
+    stage: test # Assigning the job to the 'test' stage
+    image: alpine
+    script:
+      - echo "Testing car assembly"
+      - test -f build/car.txt # Check if car.txt exists
+      - grep "This is a car file" build/car.txt # Search for specific content
+  ```
+
+### 4. Introducing Job Artifacts
+
+- To allow one job’s output to be used by another job, GitLab provides artifacts.
+
+**Artifacts**:
+
+- Save files created during a job
+
+- Make them available to later jobs
+
+- Allow downstream tasks (like testing or deployment) to use the output
+
+This is the correct way to pass files between build → test → deploy stages.
+
+**Configuring Artifacts:**
+
+```yaml
+build_car:
+  stage: build
+  image: alpine
+  script:
+    - echo "Starting car assembly"
+    - mkdir build
+    - touch build/car.txt
+    - echo "This is a car file" > build/car.txt
+  artifacts:
+    paths:
+      - build/car.txt # Specify files to be saved as artifacts
+
+test_car:
+  stage: test
+  image: alpine
+  script:
+    - echo "Testing car assembly"
+    - test -f build/car.txt # Check if car.txt exists
+    - grep "This is a car file" build/car.txt # Search for specific content
+```
+
+## GitLab CI/CD architecture
+
+![GitLab CI/CD architecture](/gitlab-cicd/gitlab-architecture.png)
+
+### 1. Pipeline Triggering
+
+- A pipeline is automatically triggered whenever there are changes in the repository  
+  (such as adding or modifying files, commits, or pushes).
+
+### 2.Core Components
+
+- **GitLab Server**
+  - Manages pipeline execution
+  - Tracks `job status` and `stores results`
+  - Acts like a **director** coordinating all tasks
+- **GitLab Runner**
+  - Executes the jobs defined in the `pipeline`
+  - Acts like **agents/workers** performing the actual work
+
+### 3. Job Execution
+
+- Each **job runs independently** from others
+- Example job: `build_car`, which has two main phases:
+  - Preparation
+  - Execution
+
+### 4. Preparation Phase
+
+- Selects an appropriate runner
+- Get required secrets and variables
+- Prepares the executor environment
+- Commonly uses a **Docker executor**
+
+### 5. Execution Phase
+
+- The runner pulls the specified Docker image
+- Init a Docker container
+- Fetches the source code from Git
+- Executes the defined commands
+- Uploads generated artifacts after completion
+
+### 6. Artifact Management
+
+- After a job finishes:
+  - The Docker container is removed to optimize resource usage
+- The next job (e.g., `test_car`):
+  - Downloads artifacts from previous jobs
+  - Reuses build results instead of rebuilding
+
+### 7. Note on Executing Jobs with Different Runners
+
+- **Default Docker Image**
+
+  - If no Docker image is defined in a job, GitLab runners use a default image.
+  - The default image is typically **Ruby-based**.
+
+- **Storage of Build Artifacts**
+
+  - Build outputs (e.g. `build/` directory, `car.txt`) are stored by GitLab internally.
+  - The exact physical storage location is abstracted and managed by GitLab
+  - Developers cant (no need) access these files
+
+- **Docker Execution Overhead**
+
+  - Using Docker introduces some overhead:
+    - Pulling Docker images
+    - Starting containers
+  - However, this overhead is acceptable due to the benefits of an **isolated and consistent build environment**.
+
+- **Using Lightweight Images**
+
+  - Lightweight images (e.g. Alpine) help:
+    - Reduce image size
+    - Decrease job startup time
+    - Improve overall pipeline performance
+
+- **Troubleshooting with Architecture Knowledge**
+  - Understanding CI/CD architecture makes troubleshooting easier.
+  - Job logs are key to identifying issues during execution.
