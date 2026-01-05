@@ -1,0 +1,112 @@
+# Section 2: Continuous Integration (CI) with GitLab (Stages, Tests, Reports, Merge Requests)
+
+- [1. Introduction to Continuous Integration (CI)](#introduction-to-continuous-integration-ci)
+- [2. Using Docker as a Build Environment in GitLab CI/CD](#using-docker-as-a-build-environment-in-gitlab-cicd)
+
+## Introduction to Continuous Integration (CI)
+
+### What is Continuous Integration (CI)?
+
+- Continuous Integration (CI) is the practice of **frequently merging code changes** into a shared repository.
+- Each merge triggers **automated build and testing**, helping detect integration issues early.
+
+### Why CI Is Important
+
+- Especially valuable in **team environments** with multiple developers.
+- Prevents large conflicts by integrating changes early and often.
+- Ensures the application remains stable as new features are added.
+
+### Automation in CI
+
+- CI relies on **automation tools** to:
+  - Build the application
+  - Run tests automatically on every commit
+- Reduces manual work and accelerates development.
+
+### Role of Git
+
+- Git is the foundation of CI workflows.
+- Platforms like **GitLab** use Git to manage versions and coordinate changes from multiple developers.
+
+### Building a CI Pipeline
+
+- CI pipelines are built **step by step**.
+- Typical pipeline tasks include:
+  - Compiling source code
+  - Running automated tests
+- The goal is to continuously validate application quality.
+
+### Using Docker in CI
+
+- Docker provides a **consistent and reproducible environment**.
+- Simplifies builds by ensuring the same setup across all pipeline runs.
+
+### Continuous Testing
+
+- Unit tests run automatically and continuously.
+- Developers receive **immediate feedback** after each change.
+- Helps maintain high code quality.
+
+### Troubleshooting
+
+- CI encourages proactive troubleshooting.
+- Developers learn to analyze logs and fix issues early in the pipeline.
+
+### Frequent Integration
+
+- CI promotes merging code **multiple times per day**.
+- Enables faster and safer software releases.
+
+---
+
+## Using Docker as a Build Environment in GitLab CI/CD
+
+---
+
+### Purpose of the Lecture
+
+- The lecture focuses on using **Docker as a build environment** inside a GitLab pipeline.
+- It highlights the importance of having required tools (e.g. **Node.js, NPM**) available for pipeline jobs.
+
+### Required Tools
+
+- Some commands require tools such as **NPM**, which comes with **Node.js**.
+- If these tools are missing, the pipeline will fail.
+- Enabling **Auto DevOps** will not fix a broken pipeline if the environment itself is incorrect.
+
+### Pipeline Definition
+
+- A pipeline requires a **`.gitlab-ci.yml`** file at the root of the repository.
+- This file defines how jobs are executed in the pipeline.
+
+### Experiment: Test NPM Job
+
+- A simple job called `test_npm` is created.
+- The job uses the **Alpine Docker image** to check Node.js and NPM versions.
+- The job fails because **Alpine does not include Node.js by default**.
+
+### Key Observation
+
+- Many Linux environments are **minimal by design**.
+- Unlike local machines, GitLab runners do not come pre-installed with all tools.
+
+### Possible Solutions
+
+1. **Manually install Node.js on the runner**
+   - Difficult to maintain
+   - Not scalable for multiple projects or different versions
+2. **Use Docker (Recommended)**
+   - Provides a ready-to-use environment
+   - Easier to manage and more reliable
+
+### Using Docker with Node.js
+
+- Switching the image from `alpine` to `node:22` solves the issue.
+- The job succeeds because Node.js and NPM are already installed.
+
+### Benefits of Using Docker
+
+- Isolated environments per job
+- No dependency conflicts between projects
+- Consistent builds across different environments
+- Containers are removed after job completion, keeping pipelines clean
