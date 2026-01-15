@@ -110,3 +110,29 @@
 - No dependency conflicts between projects
 - Consistent builds across different environments
 - Containers are removed after job completion, keeping pipelines clean
+
+### Use the Official Node.js Docker Image
+
+- Specify the **official Node.js image** (e.g. `node:22`) in your pipeline.
+- GitLab will pull a Docker image that already includes **Node.js and npm**.
+- This avoids manual installation issues.
+- Ensures a **consistent and reproducible build environment**.
+
+### Why Docker Instead of Manual Installation on Runners
+
+- Installing dependencies manually on a GitLab Runner (Shell executor) can cause problems.
+- Different projects may require **different tool versions**:
+  - Project A → Node.js 18
+  - Project B → Node.js 22
+- Manually managing multiple versions on a shared runner leads to **dependency conflicts**.
+
+### How Docker Solves This
+
+- Docker isolates dependencies inside containers.
+- Each job runs with its own:
+  - Runtime
+  - Tool versions
+  - Dependencies
+- No conflicts between projects, even on the same runner.
+
+---
