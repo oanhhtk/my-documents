@@ -1,0 +1,88 @@
+# Setup the Ideal Nuxt Development Experience with VS Code Extensions
+
+This document provides a **step-by-step guide** to setting up an optimal **Nuxt 3** development environment using **Visual Studio Code**, intended for **beginners** or **new team members joining the project**.  
+The goal is to help you **code faster, reduce bugs, and keep formatting & linting consistent across the team**.
+
+Course Structure:
+
+- [1. Required VS Code Extensions](#1️⃣-required-vs-code-extensions)
+- [2. Configure VS Code to Ignore Extension Recommendations](#3-configure-vs-code-to-ignore-extension-recommendations)
+
+---
+
+## 📥 Download Resources
+
+- **Source code**: [github](https://github.com/oanhhtk/mastering-nuxt/commit/6afb0bfcffad2ec00c54abbe56743fe7fa1d855f)
+- **Tutorial video**: [Course](https://masteringnuxt.com/2025/lessons/setup-the-ideal-nuxt-development-experience-with-vs-code-extensions)
+
+---
+
+## 🎯 Goals After Setup
+
+After completing the setup, you will have:
+
+- Accurate Vue / Nuxt code suggestions
+- Automatic formatting on save
+- TailwindCSS highlighting and autocomplete
+- Real-time ESLint error detection
+- Prisma schema support (if using backend / full-stack)
+
+---
+
+## 1️⃣ Required VS Code Extensions
+
+### 1. Vue – Volar (⚠️ REQUIRED for Nuxt 3)
+
+👉 https://marketplace.visualstudio.com/items?itemName=Vue.volar
+
+**Purpose**
+
+- IntelliSense for `<script setup>`
+- Type checking for Vue + TypeScript
+- Proper support for Nuxt auto-imports (`useRoute`, `useFetch`, `definePageMeta`, …)
+
+⚠️ **Do not use Vetur with Nuxt 3**
+
+---
+
+### 2. Tailwind CSS IntelliSense
+
+👉 https://marketplace.visualstudio.com/items?itemName=bradlc.vscode-tailwindcss
+
+**Purpose**
+
+- Tailwind class suggestions
+- Color previews
+- Validation of valid Tailwind classes
+
+## 3. Configure VS Code to Ignore Extension Recommendations
+
+- Create the following files in your project:
+
+  📄 `.vscode/settings.json`:
+
+```json
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+
+  "[vue]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  }
+}
+```
+
+📄 `.vscode/extensions.json`:
+
+```json
+{
+  "recommendations": [
+    "esbenp.prettier-vscode",
+    "Vue.volar",
+    "prisma.prisma",
+    "bradlc.vscode-tailwindcss",
+    "dbaeumer.vscode-eslint"
+  ],
+  "unwantedRecommendations": ["octref.vetur"]
+}
+```

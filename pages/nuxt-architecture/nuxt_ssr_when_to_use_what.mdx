@@ -1,0 +1,144 @@
+---
+title: "Nuxt 3 SSR – When to use what (FE Cheat Sheet)"
+description: "Quick decision guide for Nuxt 3 SSR lifecycle, hooks, and best practices"
+---
+
+# Nuxt 3 SSR – When to use what
+
+> Cheat sheet dành cho FE team: **nhìn là chọn đúng API / hook**, tránh bug SSR vs Client.
+
+---
+
+## 🚦 Golden Rules
+
+- **Cần SEO / data cho HTML ban đầu** → `useAsyncData`
+- **Cần chặn user / redirect sớm** → `route middleware`
+- **Cần DOM / browser API / JS lib** → `onMounted`
+- **Cần logic hoặc config dùng toàn app** → `plugin`
+
+---
+
+## 1. Fetching Data
+
+| Situation                    | Use                    | Why              |
+| ---------------------------- | ---------------------- | ---------------- |
+| Page cần SEO                 | `useAsyncData`         | Chạy trên server |
+| Data dùng nhiều page         | `useAsyncData` + store | Cache & reuse    |
+| Click / submit / interaction | `$fetch` trong handler | Client-only      |
+| Không cần SEO                | `onMounted`            | Đơn giản         |
+
+> ❌ Tránh fetch API trong `onMounted` cho page chính cần SEO
+
+---
+
+## 2. Access Control / Redirect
+
+| Need               | Use                          |
+| ------------------ | ---------------------------- |
+| Block trước render | Route middleware (server)    |
+| Auth check         | Route middleware             |
+| Event on/off       | Route middleware             |
+| Geo / IP block     | Plugin (detect) + middleware |
+
+---
+
+## 3. Global Logic & App Setup
+
+| Requirement      | Use             | Example         |
+| ---------------- | --------------- | --------------- |
+| API client       | Plugin          | `$api`          |
+| Locale detection | Plugin (server) | header / cookie |
+| Feature flags    | Plugin          | runtimeConfig   |
+| Logger           | Plugin          | request-id      |
+
+---
+
+## 4. DOM & Browser-only Code
+
+| Use case             | Use         |
+| -------------------- | ----------- |
+| Swiper / Chart / Map | `onMounted` |
+| `window`, `document` | `onMounted` |
+| Scroll / Resize      | `onMounted` |
+
+```ts
+onMounted(() => {
+  // browser-only logic
+});
+```
+
+---
+
+## 5. Plugin vs Middleware (Common confusion 😅)
+
+| Plugin                | Middleware           |
+| --------------------- | -------------------- |
+| Init / inject         | Guard / control flow |
+| Run once per app init | Run every navigation |
+| Không redirect        | Có redirect          |
+
+**Rule of thumb**:
+
+- "Chuẩn bị dữ liệu / service" → Plugin
+- "Quyết định cho vào page hay không" → Middleware
+
+---
+
+## 6. setup() – Do & Don’t
+
+### ✅ Do
+
+- Init reactive state
+- Normalize / map API data
+- Pure JS logic
+
+### ❌ Don’t
+
+- DOM access
+- `window` / `document`
+- Heavy side effects
+
+---
+
+## 7. SSR-safe PR Checklist
+
+- [ ] Không dùng `window` trong `setup`
+- [ ] Page data dùng `useAsyncData`
+- [ ] Middleware không access DOM
+- [ ] Plugin phân biệt `server` / `client` nếu cần
+
+---
+
+## 8. Mini Decision Tree
+
+```text
+Need data for page?
+ ├─ SEO required? → useAsyncData
+ └─ No SEO → onMounted / client fetch
+
+Need to block / redirect user?
+ └─ route middleware
+
+Need DOM or JS library?
+ └─ onMounted
+
+Need global/shared logic?
+ └─ plugin
+```
+
+---
+
+## 9. Typical Use Cases
+
+- **Event / Campaign page**
+  - Middleware: event on/off, geo block
+  - `useAsyncData`: event detail, banner
+  - `onMounted`: animation, swiper
+
+- **Dashboard**
+  - `useAsyncData`: initial data
+  - Client fetch: filters, pagination
+
+---
+
+_End of cheat sheet_
