@@ -1,0 +1,469 @@
+# 📘 Nuxt Persistent Storage Guide (Full Practical Guide for Nuxt 3/4)
+
+---
+
+# 🧠 1. Persistent Storage là gì?
+
+Trong Nuxt 3:
+
+> **Persistent Storage = mọi cách lưu dữ liệu mà không bị mất sau reload hoặc restart**
+
+---
+
+## 📦 Bao gồm:
+
+- **Client storage**: `localStorage`, `sessionStorage`, IndexedDB
+- **Cookie**: lưu trên browser, gửi kèm request
+- **Server storage**: Nitro storage (Unstorage)
+- **Database**: PostgreSQL, MySQL, MongoDB
+
+---
+
+# 🗺️ 2. Tổng quan kiến trúc
+
+```
+[ Client (Browser) ]
+   ├── localStorage / cookie
+   ↓
+[ Nuxt App ]
+   ↓
+[ Nitro Server ]
+   ↓
+[ Storage (Unstorage) ]
+   ↓
+[ Redis / FS / KV / Database ]
+```
+
+---
+
+# 🧩 3. Phân loại storage theo layer
+
+---
+
+## 🟢 CLIENT SIDE
+
+### 1. localStorage
+
+👉 Dùng cho:
+
+- UI state (theme, dark mode)
+- non-sensitive data
+
+```ts
+localStorage.setItem("theme", "dark");
+```
+
+### ⚠️ Lưu ý:
+
+- Không dùng cho dữ liệu nhạy cảm
+- Không SSR
+- User có thể sửa
+
+---
+
+### 2. sessionStorage
+
+👉 giống localStorage nhưng:
+
+- mất khi đóng tab
+
+---
+
+### 3. IndexedDB
+
+👉 dùng khi:
+
+- data lớn (offline app)
+- phức tạp hơn localStorage
+
+---
+
+### 4. Persist Pinia store (client-only)
+
+👉 Ví dụ:
+
+```ts
+export const useUserStore = defineStore("user", {
+  state: () => ({
+    theme: "light",
+  }),
+  persist: true,
+});
+```
+
+---
+
+### ⚠️ Best practices (client)
+
+- Chỉ persist field cần thiết
+- Clear khi logout
+- Không lưu token nhạy cảm
+- Encrypt client ≠ bảo mật thực sự
+
+---
+
+## 🟡 COOKIE
+
+👉 Dùng khi:
+
+- cần gửi data lên server
+- auth nhẹ
+
+```ts
+useCookie("token");
+```
+
+---
+
+### ⚠️ Lưu ý:
+
+- size nhỏ (~4KB)
+- nên dùng httpOnly cho security
+
+---
+
+# ⚙️ 4. SERVER SIDE (Nitro Storage)
+
+---
+
+## 🧠 Concept
+
+Nitro dùng **Unstorage (KV storage)**:
+
+```ts
+const storage = useStorage("db");
+```
+
+---
+
+## ❗ Bản chất
+
+- Key → Value
+- Không phải database
+- Không có query
+
+---
+
+# 🏗️ 5. Config Storage
+
+---
+
+## 🖥️ Dev (filesystem)
+
+```ts
+nitro: {
+  storage: {
+    db: {
+      driver: 'fs',
+      base: './.data'
+    }
+  }
+}
+```
+
+👉 Data lưu tại:
+
+```
+.data/db/*
+```
+
+---
+
+## ☁️ Production (Netlify blobs)
+
+```ts
+$production: {
+  nitro: {
+    storage: {
+      db: {
+        driver: 'netlify-blobs',
+        name: 'db'
+      }
+    }
+  }
+}
+```
+
+---
+
+## 🚀 Redis (production nâng cao)
+
+```ts
+driver: "redis";
+```
+
+---
+
+# 💾 6. Data lưu ở đâu?
+
+| Driver        | Lưu ở đâu     |
+| ------------- | ------------- |
+| memory        | RAM           |
+| fs            | file `.data/` |
+| redis         | Redis server  |
+| netlify-blobs | cloud         |
+
+---
+
+# 📏 7. Giới hạn storage
+
+---
+
+## FS
+
+- phụ thuộc ổ cứng
+- không scale
+
+---
+
+## Netlify blobs
+
+- giới hạn theo plan (~MB → GB)
+- giới hạn request
+
+---
+
+## Redis
+
+- phụ thuộc RAM server
+- có TTL
+
+---
+
+## Memory
+
+- mất khi restart
+
+---
+
+# 🧪 8. CRUD với storage
+
+```ts
+const storage = useStorage("db");
+
+// set
+await storage.setItem("user:1", { name: "Oanh" });
+
+// get
+await storage.getItem("user:1");
+
+// delete
+await storage.removeItem("user:1");
+```
+
+---
+
+# 🧠 9. Cache & Clear khi nào?
+
+| Driver | Khi clear      |
+| ------ | -------------- |
+| memory | restart        |
+| fs     | xoá file       |
+| redis  | TTL            |
+| blobs  | manual / quota |
+
+---
+
+## ✅ TTL example
+
+```ts
+await storage.setItem("cache:key", data, {
+  ttl: 60 * 10,
+});
+```
+
+---
+
+# 🧩 10. Data design (rất quan trọng)
+
+---
+
+## ❌ Sai
+
+```ts
+users = [1000 items]
+```
+
+---
+
+## ✅ Đúng
+
+```ts
+user: 1;
+user: 2;
+user: 3;
+```
+
+---
+
+## Structure chuẩn
+
+```
+<entity>:<id>:<sub>
+```
+
+---
+
+## Ví dụ
+
+```
+user:1
+user:1:settings
+user:1:locations:1
+cache:weather:hcm
+```
+
+---
+
+# ⚔️ 11. Storage vs Database
+
+---
+
+## Storage
+
+- nhanh
+- đơn giản
+- key-value
+- không query
+
+---
+
+## Database
+
+- query mạnh
+- relation
+- transaction
+- scalable
+
+---
+
+# 🎯 Rule:
+
+```
+Cache → Storage
+Data thật → Database
+```
+
+---
+
+# 🚀 12. Use cases
+
+---
+
+## ✅ Nên dùng storage
+
+- cache API
+- feature flag
+- session nhẹ
+- temporary data
+
+---
+
+## ❌ Không nên
+
+- user system
+- search/filter
+- analytics
+- data lớn
+
+---
+
+# 🗺️ 13. Áp dụng thực tế (Map app)
+
+---
+
+## ❌ Sai
+
+```ts
+locations = [...]
+```
+
+---
+
+## ✅ Đúng
+
+```
+location:1
+location:2
+user:1:location:1
+```
+
+---
+
+## Index nhẹ
+
+```
+user:1:locations = [1,2,3]
+```
+
+---
+
+# ⚡ 14. Best Practices
+
+---
+
+## 1. Chia nhỏ data
+
+## 2. Không lưu array lớn
+
+## 3. Có prefix rõ ràng
+
+## 4. Dùng TTL cho cache
+
+## 5. Không dùng làm database
+
+---
+
+# 🧠 15. Kiến trúc chuẩn
+
+```
+Nuxt
+ ↓
+Nitro
+ ↓
+Storage (cache)
+ ↓
+Database (source of truth)
+```
+
+---
+
+# 🎯 16. Kết luận
+
+- Persistent storage = lưu data không mất
+- Client → UI state
+- Nitro storage → cache
+- Database → data thật
+
+---
+
+# 🧠 Rule nhớ nhanh
+
+```
+Nhẹ → Storage
+Nặng → Database
+```
+
+---
+
+# 🚀 Bonus Checklist
+
+✔ Có cần persist không?
+✔ Data có nhạy cảm không?
+✔ Có cần query không?
+✔ Có cần scale không?
+
+---
+
+👉 Nếu trả lời "có" nhiều → dùng DB
+👉 Nếu "không" → storage là đủ
+
+---
+
+# 🎉 Done
+
+Bạn đã có full knowledge để:
+
+- thiết kế storage đúng
+- tránh bug cache
+- scale app Nuxt chuẩn production 🚀
