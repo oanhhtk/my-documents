@@ -1,469 +1,499 @@
+---
+title: "Nuxt Persistent Storage"
+description: "Hướng dẫn đầy đủ: client storage (localStorage, cookie), Nitro Unstorage, và database — khi nào dùng gì, config, CRUD, thiết kế key."
+---
+
 # 📘 Nuxt Persistent Storage Guide (Full Practical Guide for Nuxt 3/4)
 
+Trong Nuxt 3/4, phần chạy trên server là **Nitro**. Lưu cache/KV phía server thường qua **Unstorage** (`useStorage`). Phía **browser** thì có **localStorage**, **sessionStorage**, **cookie**, v.v. Bài này gom cả hai thế giới và so sánh với **database**.
+
+### 🎯 Goals
+
+- Hiểu persistent storage là gì (client vs server)
+- Biết **lưu ở đâu**, **config + code**, **nên / không nên** dùng
+- Tránh lỗi SSR và lỗi khi scale
+
+<a id="toc" />
+
+## Table of contents
+
+- [1. Storage layers (overview)](#toc-1)
+- [2. Quick reference](#toc-2)
+- [3. Client storage](#toc-3)
+- [4. Nitro storage (Unstorage)](#toc-4)
+- [5. Database](#toc-5)
+- [6. Storage vs database](#toc-6)
+- [7. End-to-end architecture](#toc-7)
+- [8. Checklist](#toc-8)
+- [9. Conclusion](#toc-9)
+
 ---
 
-# 🧠 1. Persistent Storage là gì?
+<a id="toc-1" />
 
-Trong Nuxt 3:
+## 1. Storage layers (overview)
 
-> **Persistent Storage = mọi cách lưu dữ liệu mà không bị mất sau reload hoặc restart**
+| Lớp                | Công cụ điển hình                                        | Chạy ở đâu                               | Ý chính                                                |
+| ------------------ | -------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------ |
+| **Client storage** | `localStorage`, `sessionStorage`, IndexedDB, `useCookie` | Chủ yếu browser (cookie kèm mọi request) | UI preference, state theo tab; **không** thay database |
+| **Nitro storage**  | `useStorage()` + Unstorage drivers (`fs`, `redis`, …)    | Server (Nitro)                           | Cache, KV tạm, feature flags — **không** query như SQL |
+| **Database**       | PostgreSQL, MySQL, MongoDB, …                            | Server / managed                         | Source of truth, query, transaction                    |
 
----
-
-## 📦 Bao gồm:
-
-- **Client storage**: `localStorage`, `sessionStorage`, IndexedDB
-- **Cookie**: lưu trên browser, gửi kèm request
-- **Server storage**: Nitro storage (Unstorage)
-- **Database**: PostgreSQL, MySQL, MongoDB
-
----
-
-# 🗺️ 2. Tổng quan kiến trúc
-
-```
-[ Client (Browser) ]
-   ├── localStorage / cookie
-   ↓
+```text
+[ Browser: localStorage / sessionStorage / cookie ]
+        ↓ HTTP
 [ Nuxt App ]
-   ↓
-[ Nitro Server ]
-   ↓
-[ Storage (Unstorage) ]
-   ↓
-[ Redis / FS / KV / Database ]
+        ↓
+[ Nitro Server — useStorage() / API routes ]
+        ↓
+[ Driver: memory | fs | redis | cloud … ]
+        ↓
+[ Database — khi cần dữ liệu nghiệp vụ & query ]
 ```
 
 ---
 
-# 🧩 3. Phân loại storage theo layer
+<a id="toc-2" />
+
+## 2. Quick reference
+
+| Nhu cầu                     | Lớp                 | Gợi ý                                               |
+| --------------------------- | ------------------- | --------------------------------------------------- |
+| Theme, sidebar đóng/mở      | Client              | `localStorage` + `process.client`                   |
+| State theo tab              | Client              | `sessionStorage`                                    |
+| Locale gửi lên SSR          | Client + server đọc | `useCookie`                                         |
+| Cache API, giảm tải backend | Nitro               | `useStorage('cache')` + driver bền (`fs`/`redis`/…) |
+| User, đơn hàng, báo cáo     | Database            | ORM / SQL                                           |
 
 ---
 
-## 🟢 CLIENT SIDE
+<a id="toc-3" />
 
-### 1. localStorage
+## 3. Client storage
 
-👉 Dùng cho:
+Gồm mọi thứ lưu **trong browser** (hoặc cookie gửi kèm request). Không dùng làm nơi duy nhất cho dữ liệu quan trọng.
 
-- UI state (theme, dark mode)
-- non-sensitive data
+---
+
+<a id="toc-3-ssr" />
+
+### SSR and safety
+
+- `localStorage` / `sessionStorage` / IndexedDB chỉ có trên **client**
+- Trong `setup()` (có thể chạy server), không gọi `window` / `localStorage` trực tiếp
 
 ```ts
-localStorage.setItem("theme", "dark");
+const theme = ref("light");
+
+if (process.client) {
+  theme.value = localStorage.getItem("theme") || "light";
+}
 ```
 
-### ⚠️ Lưu ý:
-
-- Không dùng cho dữ liệu nhạy cảm
-- Không SSR
-- User có thể sửa
-
 ---
 
-### 2. sessionStorage
+<a id="toc-3-cookie" />
 
-👉 giống localStorage nhưng:
+### Cookie
 
-- mất khi đóng tab
+Dùng khi cần server (SSR, API) **đọc được** giá trị từ request, hoặc session.
 
----
-
-### 3. IndexedDB
-
-👉 dùng khi:
-
-- data lớn (offline app)
-- phức tạp hơn localStorage
-
----
-
-### 4. Persist Pinia store (client-only)
-
-👉 Ví dụ:
+- Preference không nhạy cảm: `useCookie` với `sameSite` / `secure` hợp lý
+- Token nhạy cảm: ưu tiên **`httpOnly` do server set**, không đọc bằng JS client
 
 ```ts
-export const useUserStore = defineStore("user", {
+const locale = useCookie("locale", {
+  default: () => "vi",
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+});
+```
+
+---
+
+<a id="toc-3-ls" />
+
+### `localStorage` and `sessionStorage`
+
+**`localStorage`**
+
+- UI state (dark mode, wizard step), không chứa secret
+- User có thể sửa / xóa
+
+**`sessionStorage`**
+
+- Giống localStorage nhưng **mất khi đóng tab**
+
+---
+
+<a id="toc-3-idb" />
+
+### IndexedDB
+
+- Data lớn hơn hoặc offline (PWA)
+- Phức tạp hơn localStorage; vẫn là **client-only**
+
+---
+
+<a id="toc-3-pinia" />
+
+### Persist Pinia (client-only)
+
+Pinia **core** không có tùy chọn `persist`; cần plugin kiểu **pinia-plugin-persistedstate** (hoặc tự serialize vào `localStorage`). Ví dụ khi đã cấu hình plugin:
+
+```ts
+export const useCartStore = defineStore("cart", {
   state: () => ({
-    theme: "light",
+    items: [] as Array<{ id: string; qty: number }>,
   }),
   persist: true,
 });
 ```
 
----
-
-### ⚠️ Best practices (client)
-
-- Chỉ persist field cần thiết
-- Clear khi logout
-- Không lưu token nhạy cảm
-- Encrypt client ≠ bảo mật thực sự
+Chỉ persist field cần thiết; xóa khi logout; không coi đây là lớp bảo mật chính.
 
 ---
 
-## 🟡 COOKIE
+<a id="toc-4" />
 
-👉 Dùng khi:
+## 4. Nitro storage (Unstorage)
 
-- cần gửi data lên server
-- auth nhẹ
+Nitro tích hợp **Unstorage**: một API key–value, nhiều **driver** (memory, file, Redis, cloud, …).
+
+---
+
+<a id="toc-4-persist" />
+
+### What does persistent mean on the server?
+
+Ở đây **persistent** nghĩa là: sau khi **restart process**, data vẫn còn **nếu** driver ghi ra nơi bền (disk, Redis, blob, …). **Memory** thì restart là mất.
+
+| Loại                                 | Có mất khi restart không                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `memory`                             | Có — mất                                                                                        |
+| `fs` / Redis / cloud (đúng cấu hình) | Thường vẫn còn sau restart app (tuỳ persistence của Redis/cloud provider, eviction, xóa volume) |
+
+**Không persistent (biến trong RAM process):**
 
 ```ts
-useCookie("token");
+let count = 0;
 ```
 
----
-
-### ⚠️ Lưu ý:
-
-- size nhỏ (~4KB)
-- nên dùng httpOnly cho security
-
----
-
-# ⚙️ 4. SERVER SIDE (Nitro Storage)
-
----
-
-## 🧠 Concept
-
-Nitro dùng **Unstorage (KV storage)**:
+**Persistent qua storage (ví dụ đã cấu hình mount `db`):**
 
 ```ts
 const storage = useStorage("db");
+await storage.setItem("count", 1);
 ```
 
 ---
 
-## ❗ Bản chất
+<a id="toc-4-arch" />
 
-- Key → Value
-- Không phải database
-- Không có query
+### Architecture
+
+```text
+[ Browser ]
+     ↓
+[ Nuxt App ]
+     ↓
+[ Nitro Server ]
+     ↓
+[ Storage (Unstorage) — mount name, ví dụ "db", "cache" ]
+     ↓
+[ Driver: memory | fs | redis | netlify-blobs | … ]
+```
 
 ---
 
-# 🏗️ 5. Config Storage
+<a id="toc-4-api" />
 
----
+### Unstorage and `useStorage`
 
-## 🖥️ Dev (filesystem)
+- **Unstorage** = abstraction key-value, cùng API cho nhiều backend
+- Trong Nitro (server routes, server utils): dùng **`useStorage('tên-mount')`**. Mount phải khớp `nitro.storage` trong config (ví dụ `db`, `cache`).
 
 ```ts
-nitro: {
-  storage: {
-    db: {
-      driver: 'fs',
-      base: './.data'
-    }
-  }
-}
-```
-
-👉 Data lưu tại:
-
-```
-.data/db/*
+const storage = useStorage("db");
+await storage.setItem("user:1", { name: "Oanh" });
 ```
 
 ---
 
-## ☁️ Production (Netlify blobs)
+<a id="toc-4-drivers" />
+
+### Drivers — where data lives
+
+**1. Memory (phù hợp dev ngắn / cache chỉ trong process)**
+
+```text
+driver: 'memory'
+```
+
+- RAM của process → restart thường mất hết (không coi là persistent)
+
+**2. Filesystem (`fs`)**
 
 ```ts
-$production: {
+driver: "fs",
+base: "./.data",
+```
+
+- File dưới thư mục base (ví dụ `.data/db/...` tùy cách mount và key)
+
+**3. Redis**
+
+```ts
+driver: "redis",
+// url / host: khai báo theo tài liệu driver Nitro/Unstorage & env
+```
+
+- Nhanh, hay dùng TTL, scale tốt cho cache
+
+**4. Cloud (ví dụ Netlify Blobs)**
+
+```ts
+driver: "netlify-blobs",
+name: "db",
+```
+
+- Phù hợp serverless / edge deploy tương ứng nền tảng
+
+---
+
+<a id="toc-4-lifecycle" />
+
+### Limits and when data is cleared
+
+**Giới hạn (ý niệm):**
+
+- **FS**: phụ thuộc disk; không phải giải pháp query/scale như DB
+- **Netlify Blobs**: quota / request theo plan
+- **Redis**: RAM; có eviction policy nếu cấu hình
+
+**Khi dữ liệu bị clear (tùy driver):**
+
+| Driver      | Thường clear khi nào                      |
+| ----------- | ----------------------------------------- |
+| memory      | restart process                           |
+| fs          | xóa file / xóa thư mục base               |
+| redis       | TTL hết hạn; hoặc manual; policy eviction |
+| cloud blobs | quota, manual, lifecycle của provider     |
+
+TTL có thể hỗ trợ tùy driver — luôn đọc doc driver và test trên môi trường thật.
+
+---
+
+<a id="toc-4-config" />
+
+### Configuration in Nuxt
+
+**Dev — filesystem (ví dụ mount `db`):**
+
+```ts
+export default defineNuxtConfig({
   nitro: {
     storage: {
       db: {
-        driver: 'netlify-blobs',
-        name: 'db'
-      }
-    }
-  }
-}
+        driver: "fs",
+        base: "./.data",
+      },
+    },
+  },
+});
 ```
 
----
-
-## 🚀 Redis (production nâng cao)
+**Production** — thường đổi driver theo env (Redis, S3-compatible, blobs, …). Pattern hay gặp: dùng biến môi trường và cùng một tên mount (`db` / `cache`) để code `useStorage('db')` không đổi.
 
 ```ts
-driver: "redis";
+export default defineNuxtConfig({
+  nitro: {
+    storage: {
+      db:
+        process.env.NITRO_STORAGE_DRIVER === "redis"
+          ? { driver: "redis" /* + tuỳ chọn từ env */ }
+          : { driver: "fs", base: "./.data" },
+    },
+  },
+});
 ```
 
----
-
-# 💾 6. Data lưu ở đâu?
-
-| Driver        | Lưu ở đâu     |
-| ------------- | ------------- |
-| memory        | RAM           |
-| fs            | file `.data/` |
-| redis         | Redis server  |
-| netlify-blobs | cloud         |
+(Ví dụ minh hoạ — chi tiết `redis`/`netlify-blobs` cần khớp version Nitro và tài liệu Unstorage.)
 
 ---
 
-# 📏 7. Giới hạn storage
+<a id="toc-4-crud" />
 
----
-
-## FS
-
-- phụ thuộc ổ cứng
-- không scale
-
----
-
-## Netlify blobs
-
-- giới hạn theo plan (~MB → GB)
-- giới hạn request
-
----
-
-## Redis
-
-- phụ thuộc RAM server
-- có TTL
-
----
-
-## Memory
-
-- mất khi restart
-
----
-
-# 🧪 8. CRUD với storage
+### CRUD
 
 ```ts
 const storage = useStorage("db");
 
-// set
 await storage.setItem("user:1", { name: "Oanh" });
-
-// get
-await storage.getItem("user:1");
-
-// delete
+const user = await storage.getItem("user:1");
 await storage.removeItem("user:1");
 ```
 
 ---
 
-# 🧠 9. Cache & Clear khi nào?
+<a id="toc-4-keys" />
 
-| Driver | Khi clear      |
-| ------ | -------------- |
-| memory | restart        |
-| fs     | xoá file       |
-| redis  | TTL            |
-| blobs  | manual / quota |
+### Key design (important)
 
----
+**Good:**
 
-## ✅ TTL example
-
-```ts
-await storage.setItem("cache:key", data, {
-  ttl: 60 * 10,
-});
-```
-
----
-
-# 🧩 10. Data design (rất quan trọng)
-
----
-
-## ❌ Sai
-
-```ts
-users = [1000 items]
-```
-
----
-
-## ✅ Đúng
-
-```ts
-user: 1;
-user: 2;
-user: 3;
-```
-
----
-
-## Structure chuẩn
-
-```
-<entity>:<id>:<sub>
-```
-
----
-
-## Ví dụ
-
-```
+```text
 user:1
 user:1:settings
-user:1:locations:1
+user:1:location:1
 cache:weather:hcm
 ```
 
----
+**Bad:**
 
-# ⚔️ 11. Storage vs Database
-
----
-
-## Storage
-
-- nhanh
-- đơn giản
-- key-value
-- không query
-
----
-
-## Database
-
-- query mạnh
-- relation
-- transaction
-- scalable
-
----
-
-# 🎯 Rule:
-
-```
-Cache → Storage
-Data thật → Database
+```text
+data
+list
+allUsers
 ```
 
----
+Cấu trúc gợi ý:
 
-# 🚀 12. Use cases
+```text
+<prefix>:<entity>:<id>[:<sub>]
+```
 
----
-
-## ✅ Nên dùng storage
-
-- cache API
-- feature flag
-- session nhẹ
-- temporary data
+Tránh một key chứa **array rất lớn**; chia nhỏ theo id hoặc pagination.
 
 ---
 
-## ❌ Không nên
+<a id="toc-4-ttl" />
 
-- user system
-- search/filter
-- analytics
-- data lớn
+### TTL and best practices
 
----
+- Chia nhỏ data; tránh overwrite cả “list khổng lồ” mỗi lần
+- Dùng prefix: `cache:`, `user:`, `session:`
+- TTL: **tùy driver** — nếu hỗ trợ, có thể truyền tùy chọn TTL theo API của driver; nếu không, tự invalidate bằng version key (`cache:products:v2:list`)
 
-# 🗺️ 13. Áp dụng thực tế (Map app)
-
----
-
-## ❌ Sai
+Ví dụ ý tưởng (chỉ dùng nếu stack của bạn hỗ trợ đúng API):
 
 ```ts
-locations = [...]
+await storage.setItem("cache:key", data /* , { ttl: 60 * 10 } */);
 ```
 
 ---
 
-## ✅ Đúng
+<a id="toc-4-use" />
 
-```
-location:1
-location:2
+### Use cases and Map example
+
+**Nên dùng Nitro storage:**
+
+- Cache API, feature flags, config snapshot, session nhẹ, dữ liệu tạm
+
+**Không nên:**
+
+- Hệ thống user/order/payment làm source of truth
+- Search/filter phức tạp, analytics nặng
+
+**Map app — gợi ý key:**
+
+```text
 user:1:location:1
+user:1:location:2
+user:1:locations → [1, 2, 3]   // index nhẹ, không nhồi full object lớn
 ```
 
 ---
 
-## Index nhẹ
+<a id="toc-5" />
 
-```
-user:1:locations = [1,2,3]
-```
+## 5. Database
 
----
+Dùng khi cần:
 
-# ⚡ 14. Best Practices
+- Query (`WHERE`, join, aggregation)
+- Transaction, constraint, migration
+- Dữ liệu nghiệp vụ dài hạn và nhất quán giữa mọi client
 
----
-
-## 1. Chia nhỏ data
-
-## 2. Không lưu array lớn
-
-## 3. Có prefix rõ ràng
-
-## 4. Dùng TTL cho cache
-
-## 5. Không dùng làm database
+Nuxt không thay DB — Nitro/Unstorage **không** là chỗ thay thế PostgreSQL/MySQL cho core domain.
 
 ---
 
-# 🧠 15. Kiến trúc chuẩn
+<a id="toc-6" />
 
+## 6. Storage vs database
+
+**KV (Nitro storage):**
+
+```text
+user:1 → { name: "Oanh" }
 ```
+
+- Nhanh, đơn giản, không SQL query
+
+**Database:**
+
+```sql
+SELECT * FROM users WHERE age > 20;
+```
+
+- Query, relation, transaction
+
+**Quy tắc:**
+
+> Cache / tạm / flags → **Storage**  
+> Dữ liệu thật / báo cáo / thanh toán → **Database**
+
+---
+
+<a id="toc-7" />
+
+## 7. End-to-end architecture
+
+```text
 Nuxt
  ↓
-Nitro
- ↓
-Storage (cache)
+Nitro — useStorage (cache / KV)
  ↓
 Database (source of truth)
 ```
 
----
+**Ghi nhớ:**
 
-# 🎯 16. Kết luận
-
-- Persistent storage = lưu data không mất
-- Client → UI state
-- Nitro storage → cache
-- Database → data thật
+- Storage không phải DB; không kỳ vọng query hay transaction đầy đủ
+- Cẩn thận concurrency; data lớn nên đẩy về DB hoặc object storage phù hợp
 
 ---
 
-# 🧠 Rule nhớ nhanh
+<a id="toc-8" />
 
-```
-Nhẹ → Storage
-Nặng → Database
-```
+## 8. Checklist
 
----
-
-# 🚀 Bonus Checklist
-
-✔ Có cần persist không?
-✔ Data có nhạy cảm không?
-✔ Có cần query không?
-✔ Có cần scale không?
+- [ ] Dữ liệu thuộc **browser**, **Nitro KV**, hay **DB**?
+- [ ] Có cần SSR đọc giá trị không? → cookie / server
+- [ ] Có secret không? → không `localStorage`; token ưu tiên `httpOnly`
+- [ ] Nitro driver nào? restart thì data còn không?
+- [ ] Có cần TTL / invalidate không?
+- [ ] Có cần query/transaction không? → DB
 
 ---
 
-👉 Nếu trả lời "có" nhiều → dùng DB
-👉 Nếu "không" → storage là đủ
+<a id="toc-9" />
+
+## 9. Conclusion
+
+- **Client storage** (`localStorage`, `sessionStorage`, cookie, IndexedDB): UI và trạng thái browser; nhớ SSR boundary
+- **Nitro + Unstorage**: persistent **trên server** khi dùng driver bền; nhớ “memory ≠ persistent”
+- **Database**: nguồn dữ liệu chính khi cần query và độ tin cậy nghiệp vụ
+
+**Tóm tắt nhanh:**
+
+- Dev: hay dùng `fs` cho KV nhanh
+- Prod: `redis` / cloud driver phù hợp infra
+- Key nhỏ, có prefix; tránh array khổng lồ một key
+- Cache → storage; dữ liệu thật → database
 
 ---
 
-# 🎉 Done
-
-Bạn đã có full knowledge để:
-
-- thiết kế storage đúng
-- tránh bug cache
-- scale app Nuxt chuẩn production 🚀
+_End of guide_
