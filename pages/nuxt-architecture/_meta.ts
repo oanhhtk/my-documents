@@ -1,0 +1,5 @@
+export default {
+  nuxt_lifecycle: "Nuxt 3 SSR – Lifecycle & Execution Order",
+  nuxt_ssr_when_to_use_what: "Nuxt 3 SSR – When to use what",
+  nitro_h3_backend: "Nitro and H3 — Nuxt's Backend Architecture",
+}

@@ -1,0 +1,18 @@
+export default {
+  index: "Introduction",
+  another: "Another Page",
+  advanced: "Advanced (A Folder)",
+  "mastering-nuxt": "Mastering Nuxt",
+  "gitlab-cicd": "Gitlab CI/CD",
+  "nuxt-architecture": "Nuxt Architecture",
+  about: {
+    title: "About",
+    type: "page",
+  },
+  contact: {
+    title: "Contact ↗",
+    type: "page",
+    href: "https://twitter.com/shuding_",
+    newWindow: true,
+  },
+}

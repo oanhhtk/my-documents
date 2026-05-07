@@ -1,0 +1,5 @@
+export default {
+  "setup-ideal-extensions":
+    "Setup the Ideal Nuxt Development Experience with VS Code Extensions",
+  "persistent-storage-guide": "Nuxt Persistent Storage Guide",
+}

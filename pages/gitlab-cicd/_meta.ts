@@ -1,0 +1,5 @@
+export default {
+  introduction: "Introduction",
+  section1: "Section 1",
+  section2: "Section 2",
+}
