@@ -1,0 +1,462 @@
+---
+title: "Nitro and H3 — Nuxt's Backend Architecture"
+description: "Big-picture stack (Nuxt, Nitro, H3), request flow, code examples, storage/cache/deploy diagrams, folder structure, and production pitfalls."
+---
+
+# 📘 Nitro and H3 — Nuxt's Backend Architecture
+
+Trong Nuxt 3/4, **Nuxt không chỉ là frontend**. Đây là **fullstack framework**: phía server do **Nitro** (runtime) điều phối và **H3** (HTTP layer) xử lý request/response. Bài này đi từ **khái niệm** → **code** → **best practice** và lỗi thường gặp.
+
+```text
+Nuxt  →  Nitro  →  H3  →  API / DB
+```
+
+---
+
+## 1. Overview
+
+- Nuxt: lớp **framework** (pages, composables, build, tích hợp server).
+- Nitro: **backend runtime** — SSR server, API routes, storage, cache, preset deploy.
+- H3: **HTTP engine** bên trong Nitro — handler, `event`, body/query/cookie helpers.
+
+---
+
+## 2. Big picture architecture
+
+```text
+┌─────────┐    ┌──────────────┐    ┌──────────────┐
+│ Browser │ →  │    Nuxt      │ →  │    Nitro     │
+│ client  │    │ · pages/     │    │ · SSR        │
+└─────────┘    │ · components/│    │ · API routes │
+               │ · composables│    │ · storage    │
+               │ · layouts/   │    │ · cache      │
+               └──────────────┘    │ · deploy     │
+                                   └──────┬───────┘
+                                          ▼
+                                   ┌────────────────┐
+                                   │ Your API / DB  │
+                                   └──────┬─────┬───┘
+                                          ▼
+                                   ┌──────────────┐
+                                   │     H3       │
+                                   │ · handling   │
+                                   │ · query/body │
+                                   │ · cookies/hdr│
+                                   └──────────────┘
+```
+
+---
+
+## 3. Layer responsibilities
+
+| Layer     | Vai trò                                                                    |
+| --------- | -------------------------------------------------------------------------- |
+| **Nuxt**  | Framework tầng cao: UI, routing client, build, tích hợp Nitro              |
+| **Nitro** | Backend runtime / server engine: route server, SSR, storage, cache, deploy |
+| **H3**    | HTTP engine: request/response, parsing, helpers trên `event`               |
+
+```text
+Nitro dùng H3 bên trong để xử lý HTTP
+```
+
+---
+
+## 4. Nitro — vai trò và tính năng
+
+Nitro là **server engine** của Nuxt: đăng ký route, nạp handler, tích hợp storage/cache và **preset triển khai** (Node, serverless, edge, …).
+
+```text
+Nitro Runtime
+   │
+   ├── API Routes
+   ├── SSR Rendering
+   ├── Storage Layer
+   ├── Cache Layer
+   ├── Middleware
+   ├── Route Rules
+   └── Multi-platform Deploy
+```
+
+- **API:** `server/api/*` → REST-style endpoints.
+- **SSR:** render HTML phía server (không thay thế khái niệm lifecycle Vue; xem [SSR lifecycle](/nuxt-architecture/nuxt_lifecycle)).
+- **Storage:** `useStorage()` (Unstorage) — [chi tiết](/mastering-nuxt/persistent-storage-guide).
+- **Cache:** `defineCachedEventHandler()` bọc response handler.
+
+---
+
+## 5. Request flow (chi tiết một call)
+
+Ví dụ người dùng gọi: `https://app.com/api/user?id=1`
+
+```text
+User opens:
+https://app.com/api/user?id=1
+
+        ↓
+
+Nitro receives request
+
+        ↓
+
+Nitro finds route:
+server/api/user.ts
+
+        ↓
+
+H3 handler runs:
+defineEventHandler()
+
+        ↓
+
+getQuery(event)
+
+        ↓
+
+Response returned
+```
+
+Luồng tóm tắt:
+
+```text
+Browser
+   ↓
+Nuxt
+   ↓
+Nitro runtime
+   ↓
+H3 handler
+   ↓
+API logic (của bạn)
+   ↓
+Response
+```
+
+---
+
+## 6. H3 — HTTP layer và `event`
+
+H3 là framework HTTP **tối giản**, **universal** hơn mô hình “Express cổ điển”: gắn với Nitro preset, không bắt bạn tự dựng `createServer` cho từng route.
+
+Handler nhận **`event`** (request context + helpers):
+
+```ts
+export default defineEventHandler((event) => {
+  return { message: "hello" };
+});
+```
+
+### Built-in utilities (H3)
+
+```text
+Request
+   │
+   ├── readBody(event)
+   │      → POST / PUT body
+   │
+   ├── getQuery(event)
+   │      → URL query (?id=1)
+   │
+   ├── getHeader(event)
+   │      → headers
+   │
+   └── setCookie(event, ...)
+          → response cookie
+```
+
+**readBody**
+
+```ts
+const body = await readBody(event);
+```
+
+**getQuery**
+
+```ts
+const query = getQuery(event);
+```
+
+**setCookie** (auth thật cần `httpOnly` / `secure` / policy phù hợp)
+
+```ts
+setCookie(event, "token", "123");
+```
+
+---
+
+## 7. H3 vs Express (tóm tắt)
+
+|                 | Express                     | H3                           |
+| --------------- | --------------------------- | ---------------------------- |
+| Môi trường      | Thường tập trung Node       | Universal hơn (Nitro preset) |
+| Phong cách      | Middleware chain quen thuộc | Composable, API hiện đại     |
+| Kích thước / DX | Ecosystem lớn               | Nhẹ, đi cùng Nitro           |
+
+---
+
+## 8. Real code example
+
+### File structure
+
+```text
+server/
+ └── api/
+      └── user.ts
+```
+
+### Handler (H3 / Nitro)
+
+```ts
+export default defineEventHandler(async (event) => {
+  const query = getQuery(event);
+
+  return {
+    id: query.id,
+    name: "Oanh",
+  };
+});
+```
+
+### Request
+
+```text
+GET /api/user?id=1
+```
+
+### Response (ví dụ)
+
+```json
+{
+  "id": "1",
+  "name": "Oanh"
+}
+```
+
+### Minimal hello route (nhắc nhanh)
+
+File `server/api/hello.ts`:
+
+```ts
+export default defineEventHandler(() => {
+  return { hello: "world" };
+});
+```
+
+→ **`GET /api/hello`**. `defineEventHandler` là API **H3/Nitro**, được Nitro đăng ký thành route.
+
+---
+
+## 9. Storage + cache architecture
+
+Cả **storage** và **cache** đều là tầng **Nitro** (server), không phải API trực tiếp của Vue ở browser.
+
+```text
+API Request
+    ↓
+defineCachedEventHandler()   ← (tuỳ chọn) cache response
+    ↓
+Nitro Cache Layer
+    ↓
+Nitro Storage (useStorage)
+    ↓
+Redis / FS / Memory / …
+```
+
+- **`useStorage()`** — Unstorage; drivers: memory, `fs`, Redis, cloud… Xem [Persistent Storage](/mastering-nuxt/persistent-storage-guide).
+- **`defineCachedEventHandler()`** — cache theo key/TTL tùy cấu hình Nitro.
+
+---
+
+## 10. Nitro build output
+
+Sau `nuxt build`, bundle server thường nằm dưới:
+
+```text
+.output/
+.output/server/index.mjs
+```
+
+(Chi tiết tên file có thể thay đổi theo phiên bản; ý chính là **server bundle tách biệt** client.)
+
+---
+
+## 11. Điều xảy ra khi bạn thêm `server/api/posts.ts`
+
+Bạn chỉ khai báo file; phần nặng do build + Nitro:
+
+```text
+Nuxt (build)
+   ↓
+Nitro route registry
+   ↓
+H3 request handler
+```
+
+Bạn **không** bắt buộc tự viết `createServer()` kiểu Express cho từng route — mô hình **route-as-handler**.
+
+---
+
+## 12. Deployment architecture
+
+Cùng một codebase Nuxt, Nitro **abstract** platform thông qua preset:
+
+```text
+Same Nuxt Code
+       │
+       ├── Node Server
+       ├── Vercel Functions
+       ├── Netlify Functions
+       ├── Cloudflare Workers
+       └── Edge Runtime
+```
+
+---
+
+## 13. Production architecture (gợi ý)
+
+Thực tế triển khai thường thêm CDN, cache, DB:
+
+```text
+Browser
+   ↓
+CDN
+   ↓
+Nuxt + Nitro
+   ↓
+Redis Cache (tuỳ app)
+   ↓
+Database
+```
+
+---
+
+## 14. Mental model
+
+```text
+Nuxt = Fullstack Framework
+Nitro = Backend Runtime
+H3 = HTTP Engine
+```
+
+**Một dòng:**
+
+```text
+Nuxt tạo app · Nitro chạy backend · H3 xử lý HTTP
+```
+
+---
+
+## 15. Traditional vs Nuxt stack
+
+| Traditional             | Nuxt modern stack                  |
+| ----------------------- | ---------------------------------- |
+| Express (HTTP style)    | H3                                 |
+| Custom Node server      | Nitro                              |
+| React + API server tách | Nuxt fullstack (cùng repo / build) |
+
+Đây là **mapping trực giác**, không phải API tương đương 1:1. **Nitro ≠ copy-paste tâm lý Express** (middleware global, `req/res` cũ) — nên đọc doc Nitro/H3 cho đúng primitive.
+
+---
+
+## 16. Best practice — cấu trúc `server/`
+
+Gợi ý tách lớp khi app lớn (tên thư mục có thể tuỳ team):
+
+```text
+server/
+ ├── api/              ← defineEventHandler, chỉ orchestration
+ ├── middleware/
+ ├── services/         ← business logic
+ ├── repositories/     ← truy cập DB / external API
+ ├── utils/
+ ├── validators/       ← ví dụ Zod schemas
+ └── schemas/
+```
+
+**Luồng gợi ý:**
+
+```text
+Request
+   ↓
+Middleware
+   ↓
+Validation (Zod + readBody / getQuery)
+   ↓
+Service layer
+   ↓
+Storage / Cache / DB
+   ↓
+Response
+```
+
+Route file mỏng: parse input → gọi service → trả DTO; **không** nhồi query SQL + validate + map toàn bộ trong một handler.
+
+---
+
+## 17. Common mistakes
+
+### Coi Nitro như Express thuần
+
+```text
+Nitro ≠ “traditional Node server” theo nghĩa bạn tự giữ mọi middleware toàn cục giống Express
+```
+
+Hãy học **event handler**, **Nitro middleware**, **route rules** đúng tài liệu.
+
+### Nhồi business vào một file `server/api/*.ts`
+
+**Bad:** Một file API chứa luôn DB, validation, transform, mọi nhánh.
+
+**Better:**
+
+```text
+API Route
+   ↓
+Service
+   ↓
+Repository
+   ↓
+DB
+```
+
+---
+
+## 18. Tại sao kiến trúc này hữu ích?
+
+- **Nhẹ:** H3 phù hợp cold start serverless/edge.
+- **Universal:** cùng code, nhiều target nhờ Nitro preset.
+- **Fullstack DX:** API và UI cùng tooling.
+- **Tách runtime:** ranh giới Nuxt (app) vs Nitro (server) rõ dần khi scale.
+
+---
+
+## 19. Recommended learning path
+
+```text
+1. H3 basics (event, readBody, getQuery)
+2. Nitro runtime (routes, middleware)
+3. Storage (useStorage / Unstorage)
+4. Cache (defineCachedEventHandler)
+5. Middleware (server)
+6. Zod validation
+7. Auth (cookie httpOnly, session strategy)
+8. SSR lifecycle
+9. Edge deployment & limits
+```
+
+Đọc thêm trong repo:
+
+- [Persistent Storage (Nitro + Unstorage)](/mastering-nuxt/persistent-storage-guide)
+- [Nuxt SSR lifecycle](/nuxt-architecture/nuxt_lifecycle)
+
+---
+
+## 20. Kết luận
+
+- **Nuxt** dựng app fullstack; **Nitro** chạy backend runtime; **H3** xử lý HTTP trong handler.
+- **Concept:** hiểu lớp và luồng request.
+- **Code:** `server/api/*` + `defineEventHandler` + helpers.
+- **Best practice:** tách lớp, validate sớm, cache/storage đúng chỗ; tránh lẫn mental model Express.
+
+---
+
+_End of guide_
