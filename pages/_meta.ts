@@ -2,6 +2,7 @@ export default {
   index: "Introduction",
   another: "Another Page",
   advanced: "Advanced (A Folder)",
+  "case-studies": "Case studies",
   "mastering-nuxt": "Mastering Nuxt",
   "gitlab-cicd": "Gitlab CI/CD",
   "nuxt-architecture": "Nuxt Architecture",
@@ -15,4 +16,4 @@ export default {
     href: "https://twitter.com/shuding_",
     newWindow: true,
   },
-}
+};

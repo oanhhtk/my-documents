@@ -1,0 +1,547 @@
+---
+title: Upload file lớn (GB) — chunk, resume, merge
+description: Ngữ cảnh upload file GB, giải pháp chunk/resume/merge, tech stack (Nuxt/Nitro, TypeScript, streams), diagram và best practice.
+---
+
+# Upload file lớn hàng GB: chunk, resume, merge
+
+Phần còn lại của tài liệu mô tả **toàn bộ luồng** upload file rất lớn bằng **nhiều chunk**, **resume** khi lỗi, và **merge** sau khi xác minh. Cấu trúc từng mục chính: **ý tưởng → cách triển khai (code) → best practice**.
+
+---
+
+## Introduction
+
+### Ngữ cảnh
+
+Ứng dụng web thường cho phép tải lên tài liệu, video, bản sao lưu hoặc dữ liệu sản xuất với dung lượng **hàng GB hoặc vài chục GB**. Trên thực tế, một request HTTP duy nhất chứa toàn bộ file dễ **hết thời gian chờ** ở CDN, reverse proxy hoặc trình duyệt; kết nối **đứt giữa chừng** (Wi-Fi, VPN, chuyển tab) khiến người dùng phải **upload lại từ đầu**, tốn băng thông và thời gian. Phía server, nếu đọc toàn bộ body vào **RAM** trước khi ghi disk, file lớn sẽ **đẩy bộ nhớ** lên cao hoặc gây lỗi ổn định.
+
+Bài viết giả định bạn xây **full-stack** (ví dụ SPA gọi API riêng), cần kiểm soát **toàn vẹn dữ liệu** (đủ chunk, đúng thứ tự, checksum) và có thể **tiếp tục upload** sau khi lỗi mà không làm lệch dữ liệu so với file gốc trên máy người dùng.
+
+### Cách giải quyết (tóm tắt)
+
+1. **Phiên upload có định danh** — Server cấp `uploadId` (thường dùng UUID); mọi chunk và trạng thái resume gắn với ID này.
+2. **Chia file cố định theo kích thước** — Client dùng `File.slice` để tạo từng phần nhỏ, gửi qua nhiều request; có thể **song song** với **giới hạn đồng thời** để cân bằng tốc độ và tải cho client/router.
+3. **Ghi chunk dạng stream xuống lưu trữ tạm** — Mỗi phần lưu thành file `.part` (hoặc part trên object storage); tránh buffer cả file trong RAM.
+4. **Metadata bền** — Ghi nhận chunk index nào đã **ghi xong và verify** (DB, Redis hoặc Nitro storage) để sau restart vẫn **resume** được.
+5. **Merge có điều kiện** — Chỉ ghép các part thành file cuối khi **đủ số chunk** đã khai báo; có thể kiểm tra **hash từng chunk** / hash toàn file trước khi coi là hoàn tất; sau đó **dọn temp**.
+
+Luồng này tách rõ **upload nhiều phần** (phía client tự điều phối) với **download đa luồng** (thường được trình duyệt/CDN hỗ trợ sẵn hơn).
+
+### Tech stack trong bài viết
+
+Các công nghệ và khái niệm được dùng xuyên suốt guide (phù hợp stack **Nuxt / Vue** điển hình; phần server có thể áp dụng tương tự cho Node khác):
+
+| Lớp                      | Công nghệ / công cụ                                                                           | Vai trò trong luồng upload                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Framework**            | [Nuxt](https://nuxt.com/) (ví dụ Nuxt 4), **Nitro**                                           | API routes dưới `server/api/`, chạy trên Node; cấu hình storage (`nitro.storage`) cho metadata tạm nếu cần. |
+| **Ngôn ngữ**             | **TypeScript**                                                                                | Hợp đồng API, type response `InitResponse`, handler an toàn hơn.                                            |
+| **Client**               | **File API** (`File`, `Blob`, `file.slice`)                                                   | Chia file không nạp hết vào RAM; từng chunk đưa vào `fetch` / `$fetch`.                                     |
+| **HTTP**                 | **`fetch`**, **`$fetch` (ofetch)**                                                            | Gửi từng chunk (PUT) và gọi init / status / complete.                                                       |
+| **Stream (server)**      | **`node:fs` `createReadStream` / `createWriteStream`**, **`node:stream/promises` `pipeline`** | Đọc/ghi file lớn theo luồng; merge tuần tự part → file cuối.                                                |
+| **Stream (nền tảng)**    | **Web Streams** (khái niệm liên quan khi xử lý body dạng stream)                              | Đồng bộ mô hình luồng giữa client và server hiện đại.                                                       |
+| **Định danh & validate** | **UUID**, gợi ý **Zod**                                                                       | `uploadId`; validate body init (`fileSize`, `chunkSize`).                                                   |
+| **Lưu trữ & production** | **Disk temp**, gợi ý **S3 Multipart** / **GCS resumable**, **TUS**                            | Temp local cho ví dụ; object storage / protocol khi file cực lớn và cần SLA.                                |
+| **Tài liệu hóa luồng**   | **ASCII / text** trong fenced code block (`text`)                                             | Hiển thị trong mọi viewer Markdown; không phụ thuộc Mermaid.                                                |
+
+Phần code trong guide là **minh họa**; production nên bổ sung **auth**, **rate limit**, **dọn session hết hạn** và chọn storage (local vs cloud) phù hợp SLA.
+
+### Luồng xem hệ thống (system view)
+
+<span id="flow-system-view"></span>
+
+```text
++----------------------------+       +----------------------------+
+| CLIENT                     |       | NITRO API                  |
+| slice + queued PUTs        |  -->  | stream handlers            |
++----------------------------+       +----------------------------+
+              \         /
+               v       v
++----------------------------+ +----------------------------+
+| TEMP *.part / index        | | METADATA uploadId          |
+| disk or object part        | | missing[], verify          |
++----------------------------+ +----------------------------+
+               \       /
+                 v     v
+           +----------------------------+
+           | MERGED FILE -> URL/ID      |
+           +----------------------------+
+```
+
+---
+
+## Mục lục
+
+1. [Introduction](#introduction)
+2. [Vì sao không upload một phát?](#1-vì-sao-không-upload-một-phát)
+3. [Thuật ngữ và mục tiêu thiết kế](#2-thuật-ngữ-và-mục-tiêu-thiết-kế)
+4. [Luồng tổng thể (sequence)](#3-luồng-tổng-thể-sequence)
+5. [Front-end: chia chunk và giới hạn song song](#4-front-end-chia-chunk-và-giới-hạn-song-song)
+6. [Server: nhận chunk, metadata, merge](#5-server-nhận-chunk-metadata-merge)
+7. [Resume sau sự cố](#6-resume-sau-sự-cố)
+8. [Hợp đồng API gợi ý](#7-hợp-đồng-api-gợi-ý)
+9. [Nuxt / Nitro: gợi ý code](#8-nuxt--nitro-gợi-ý-code)
+10. [Best practice tổng hợp](#9-best-practice-tổng-hợp)
+11. [Khi nên dùng giải pháp có sẵn](#10-khi-nên-dùng-giải-pháp-có-sẵn)
+
+---
+
+## 1. Vì sao không upload một phát?
+
+### Ý tưởng
+
+Một HTTP request đẩy **toàn bộ** file chục GB sẽ gặp:
+
+- Timeout proxy/CDN/server/client.
+- Mất kết nối giữa chừng → thường phải **upload lại từ đầu**.
+- Tăng áp lực **RAM** nếu framework cố buffer toàn body.
+
+**Multipart / chunked upload**: chia file thành nhiều phần nhỏ, gửi **nhiều request** (có thể **song song có giới hạn**). Lỗi chỉ ảnh hưởng **một vài chunk**; có **uploadId** và **metadata phía server** thì có thể **resume**.
+
+### Triển khai (ý niệm code)
+
+- Cố định `chunkSize` (ví dụ 5–32 MB tùy hạ tầng).
+- `totalChunks = ceil(fileSize / chunkSize)`.
+- Mỗi chunk: `file.slice(start, end)` → `PUT`/`POST` kèm **index** và tùy chọn **hash**.
+
+### Best practice
+
+- Chọn `chunkSize` cân bằng: quá nhỏ → nhiều request overhead; quá lớn → ít lợi khi retry.
+- **Không** đổi `chunkSize` sau khi đã tạo phiên upload.
+
+#### So sánh nhanh: một request vs nhiều chunk
+
+<span id="flow-compare"></span>
+
+```text
++----------------------------+   +----------------------------+
+| ONE big POST               |   | MANY chunks + session      |
+| long connection            |   | many short PUTs            |
+| drop -> restart            |   | retry one chunk            |
+| large RAM buffer           |   | RAM ~ one part buf         |
+| no resume id               |   | uploadId + missing         |
++----------------------------+   +----------------------------+
+```
+
+---
+
+## 2. Thuật ngữ và mục tiêu thiết kế
+
+| Thuật ngữ          | Ý nghĩa                                                                          |
+| ------------------ | -------------------------------------------------------------------------------- |
+| **Upload session** | Một lần upload được định danh bằng `uploadId` (UUID).                            |
+| **Chunk index**    | Số thứ tự phần `0 .. totalChunks - 1`.                                           |
+| **Metadata**       | Ai đã gửi, chunk nào đã **ghi và verify** xong.                                  |
+| **Temp parts**     | File `.part` trên disk/object storage cho từng index.                            |
+| **Merge**          | Ghép tuần tự các part thành **một file cuối** — chỉ khi **đủ** part đã xác thực. |
+
+**Mục tiêu bất biến**: khi merge, byte stream cuối **trùng** với file gốc → cần **đủ chunk đúng thứ tự** + nên có **checksum từng chunk** (và tùy chọn hash toàn file).
+
+---
+
+## 3. Luồng tổng thể (sequence)
+
+### Ý tưởng
+
+1. Client tạo session → nhận `uploadId` + `totalChunks`.
+2. Client gửi từng chunk; server **stream** body xuống disk, cập nhật metadata.
+3. Client gọi **complete**; server kiểm tra đủ chunk → merge → xóa temp → trả URL/`fileId`.
+
+#### Luồng tổng thể (pipeline dọc)
+
+<span id="flow-overall"></span>
+
+```text
++----------------------------+
+| 1) POST /uploads (init)    |
+| uploadId + totalChunks     |
++----------------------------+
+              v
++----------------------------+
+| 2) PUT .../chunks/:i       |
+| slice; concurrency<=N      |
++----------------------------+
+              v
++----------------------------+
+| 3) stream -> tmp/*.part    |
+| store metadata per index   |
++----------------------------+
+              v
++----------------------------+
+| 4) POST .../complete       |
++----------------------------+
+              v
++----------------------------+
+| 5) ok: merge + URL         |
+| fail: 409 + missing[]      |
++----------------------------+
+```
+
+#### Sequence: từ khởi tạo đến merge
+
+<span id="flow-sequence"></span>
+
+```text
+  | FE               | API              | TMP              | META             |
+  |                  |                  |                  |                  |
+  | POST /uploads    |                  |                  |                  |
+  |+---------------> |                  |+---------------> |                  |
+  |<- uploadId ----  |                  |                  |                  |
+  | totalChunks      |                  |                  |                  |
+  |                  |                  |                  |                  |
+  | (each index)     |                  |                  |                  |
+  | workers<=N       |                  |                  |                  |
+  |                  |                  |                  |                  |
+  | PUT :i ------->  |-- stream ------> | write .part      |                  |
+  |                  |+--- OK --------->|+---------------> |                  |
+  |<- 200 ---------- |                  |                  |                  |
+  |                  |                  |                  |                  |
+  | POST complete    |                  |                  |                  |
+  |+---------------> |+-- verify -------|+---------------> |                  |
+  |<- 409 / 200 ---- | merge if ok      |                  |                  |
+```
+
+### Best practice
+
+- **Idempotent** theo index: gửi lại cùng index → ghi đè part (sau khi verify hash).
+- **Complete** là thao tác rõ ràng; tránh tự merge ngay chunk cuối nếu client có thể còn retry chunk giữa chừng — trừ khi có locking/transaction chặt.
+
+---
+
+## 4. Front-end: chia chunk và giới hạn song song
+
+### Ý tưởng
+
+- **`File.slice`** tạo `Blob` không đọc hết file vào RAM.
+- **Hàng đợi + pool** (ví dụ tối đa 5 request đồng thời) để tăng tốc mà không làm sập tab hoặc router.
+
+#### Front-end: queue + workers (concurrency)
+
+<span id="flow-frontend-queue"></span>
+
+```text
++----------------------------+
+| input File, size S         |
+| chunk C; totalChunks       |
++----------------------------+
+              v
++----------------------------+
+| POST init -> uploadId      |
+| GET may -> missing[]       |
++----------------------------+
+              v
++----------------------------+
+| queue index list           |
+| workers take next idx      |
++----------------------------+
+     |        |        |
+     v        v        v
+   +----+  +----+  +----+
+   | W1 |  | W2 |  | W3 |
+   +----+  +----+  +----+
+  workers<=N slice+PUT
+      \      |      /
+       \     v     /
+     all chunks ok
+              v
++----------------------------+
+| POST .../complete          |
++----------------------------+
+```
+
+### Code (minh họa TypeScript)
+
+```typescript
+type InitResponse = { uploadId: string; totalChunks: number };
+
+export async function uploadLargeFile(
+  file: File,
+  opts: { chunkSize?: number; concurrency?: number } = {},
+) {
+  const chunkSize = opts.chunkSize ?? 8 * 1024 * 1024;
+  const concurrency = opts.concurrency ?? 5;
+  const totalChunks = Math.ceil(file.size / chunkSize);
+
+  const { uploadId } = await $fetch<InitResponse>("/api/uploads", {
+    method: "POST",
+    body: {
+      fileName: file.name,
+      fileSize: file.size,
+      chunkSize,
+    },
+  });
+
+  const status = await $fetch<{ missing: number[] }>(
+    `/api/uploads/${uploadId}`,
+  );
+  const queue =
+    status.missing.length > 0
+      ? [...status.missing]
+      : Array.from({ length: totalChunks }, (_, i) => i);
+
+  async function worker() {
+    while (queue.length) {
+      const index = queue.shift();
+      if (index === undefined) return;
+      const start = index * chunkSize;
+      const blob = file.slice(start, Math.min(start + chunkSize, file.size));
+      const res = await fetch(`/api/uploads/${uploadId}/chunks/${index}`, {
+        method: "PUT",
+        body: blob,
+      });
+      if (!res.ok) {
+        queue.push(index);
+        throw new Error(`Chunk ${index} failed`);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+  return await $fetch(`/api/uploads/${uploadId}/complete`, {
+    method: "POST",
+  });
+}
+```
+
+### Best practice
+
+- **Retry có backoff** cho 429/503; giới hạn số lần retry mỗi index.
+- **Progress UI**: `completed / totalChunks` dựa trên sự kiện từng chunk OK.
+- Optional: **hash chunk** (Web Crypto + `crypto.subtle.digest` trên từng slice) gửi qua header `X-Chunk-Hash`.
+
+---
+
+## 5. Server: nhận chunk, metadata, merge
+
+### Ý tưởng
+
+- Body chunk là **stream** → **`fs.createWriteStream`** (Node) hoặc SDK S3 `UploadPart` — **không** đọc hết vào `Buffer` một lần.
+- Metadata: `Set` các index đã nhận; persist (DB, Redis, Nitro storage) để **resume** sau restart server.
+
+#### Nhận chunk dạng stream (tránh RAM)
+
+<span id="flow-server-stream"></span>
+
+```text
++----------------------------+
+| incoming HTTP body         |
++----------------------------+
+         |                 |
+         v                 v
++----------------------------+   +----------------------------+
+| WRONG: readBody all        |   | RIGHT: pipeline            |
+| big Buffer in RAM          |   | -> *.part stream           |
++----------------------------+   +----------------------------+
+                   |
+                   v
++----------------------------+
+| tmp/:uploadId/:i.part      |
++----------------------------+
+                   v
++----------------------------+
+| metadata: index received   |
++----------------------------+
+```
+
+#### Merge khi đủ chunk
+
+<span id="flow-merge"></span>
+
+```text
++----------------------------+
+| POST .../complete          |
++----------------------------+
+              v
+           /-----\
+          | ok?   |
+           \-----/
+         /         \
+        v           v
++----------------------------+ +----------------------------+
+| merge parts 0..n-1         | | 409 + missing[]            |
+| verify + delete tmp        | | wait for chunks            |
++----------------------------+ +----------------------------+
+        v
++----------------------------+
+| 200 fileId / URL           |
++----------------------------+
+```
+
+### Code — minh họa merge tuần tự (Node)
+
+```typescript
+import {
+  createWriteStream,
+  createReadStream,
+  mkdir,
+  rm,
+} from "node:fs/promises";
+import { createWriteStream as createWs } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import path from "node:path";
+
+export async function mergeParts(
+  uploadId: string,
+  totalChunks: number,
+  tmpDir: string,
+  finalPath: string,
+) {
+  await mkdir(path.dirname(finalPath), { recursive: true });
+  const out = createWs(finalPath);
+  for (let i = 0; i < totalChunks; i++) {
+    const part = path.join(tmpDir, uploadId, `${i}.part`);
+    await pipeline(createReadStream(part), out, { end: false });
+  }
+  out.end();
+  await rm(path.join(tmpDir, uploadId), { recursive: true, force: true });
+}
+```
+
+_Lưu ý_: ví dụ trên minh họa ý tưởng; production có thể dùng `fd` + `writev` hoặc merge qua object storage multipart.
+
+### Best practice
+
+- **Quota disk** + TTL cho session chưa complete (cleanup cron).
+- **Auth**: chỉ user tạo session mới được gửi chunk / complete.
+- **Giới hạn** `fileSize` / số session / rate limit theo IP/user.
+
+---
+
+## 6. Resume sau sự cố
+
+### Ý tưởng
+
+Client lưu `uploadId` (ví dụ `localStorage` hoặc state app). Sau khi reload:
+
+- `GET /uploads/:id` → `uploadedIndexes` hoặc `missing[]`.
+- Chỉ `PUT` các index còn thiếu → sau đó `complete`.
+
+#### Luồng resume sau sự cố
+
+<span id="flow-resume"></span>
+
+```text
++----------------------------+
+| network / tab / 5xx        |
++----------------------------+
+              v
++----------------------------+
+| client keeps uploadId      |
++----------------------------+
+              v
++----------------------------+
+| GET /uploads/:id           |
++----------------------------+
+              v
++----------------------------+
+| server: uploaded/missing   |
++----------------------------+
+              v
++----------------------------+
+| PUT missing indexes only   |
++----------------------------+
+              v
++----------------------------+
+| POST complete when full    |
++----------------------------+
+```
+
+### Best practice
+
+- `GET` trả về cả `expiresAt` để client biết session sắp hết hạn.
+- Server có thể **reconcile**: nếu file part tồn tại nhưng metadata mất → quét disk (chậm hơn; backup plan).
+
+---
+
+## 7. Hợp đồng API gợi ý
+
+| Endpoint                         | Method | Body / ghi chú                                                    |
+| -------------------------------- | ------ | ----------------------------------------------------------------- |
+| `/api/uploads`                   | `POST` | `{ fileName, fileSize, chunkSize }` → `{ uploadId, totalChunks }` |
+| `/api/uploads/:id`               | `GET`  | `{ missing: number[], uploaded: number[], expiresAt? }`           |
+| `/api/uploads/:id/chunks/:index` | `PUT`  | Raw bytes; headers: `Content-Length`, optional `X-Chunk-Hash`     |
+| `/api/uploads/:id/complete`      | `POST` | → `{ fileId, url? }` hoặc `409` + `missing`                       |
+
+---
+
+## 8. Nuxt / Nitro: gợi ý code
+
+### Ý tưởng
+
+Đặt handler trong `server/api/uploads/`:
+
+- `index.post.ts` — khởi tạo session.
+- `[id]/index.get.ts` — trạng thái resume.
+- `[id]/chunks/[index].put.ts` — nhận stream; dùng `event.node.req` stream pipe ra file (tránh `readBody` toàn khối cho file GB).
+
+### Minh họa nhận stream (pseudo Nitro)
+
+```typescript
+// server/api/uploads/[id]/chunks/[index].put.ts
+import { Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { createWriteStream } from "node:fs";
+import path from "node:path";
+
+export default defineEventHandler(async (event) => {
+  const id = getRouterParam(event, "id");
+  const index = Number(getRouterParam(event, "index"));
+  if (!id || !Number.isFinite(index)) throw createError({ statusCode: 400 });
+
+  const partPath = path.join(
+    process.cwd(),
+    ".data/uploads/tmp",
+    id,
+    `${index}.part`,
+  );
+  await import("node:fs/promises").then((fs) =>
+    fs.mkdir(path.dirname(partPath), { recursive: true }),
+  );
+
+  await pipeline(event.node.req, createWriteStream(partPath));
+
+  // TODO: verify hash header, cập nhật nitro/storage hoặc DB
+
+  return { ok: true, index };
+});
+```
+
+Điều chỉnh thực tế: tách service layer, zod validate params, kiểm tra auth, và dùng storage production (không chỉ local disk).
+
+### Best practice
+
+- **Không** log toàn bộ body.
+- Timeout / body size ở reverse proxy (nginx) phải phù hợp với `chunkSize`.
+
+---
+
+## 9. Best practice tổng hợp
+
+| Chủ đề       | Khuyến nghị                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------------- |
+| **Bộ nhớ**   | Stream end-to-end; không buffer toàn file hoặc toàn chunk lớn trong RAM.                                    |
+| **Toàn vẹn** | Hash từng chunk; optional hash file sau merge.                                                              |
+| **Race**     | Ghi part atomically (write temp rồi rename) nếu OS hỗ trợ.                                                  |
+| **Bảo mật**  | AuthZ trên `uploadId`, rate limit, scan virus sau merge (tuỳ domain).                                       |
+| **Giám sát** | Metric: thời gian merge, số session dở, dung lượng temp.                                                    |
+| **Download** | Phía client download nhiều range thường do browser/CDN hỗ trợ; **upload** thường phải tự thiết kế như trên. |
+
+---
+
+## 10. Khi nên dùng giải pháp có sẵn
+
+Tự implement trên Nitro **phù hợp học tập và kiểm soát đơn giản**. Với **production file cực lớn**, cân nhắc:
+
+- **S3 Multipart Upload** / **GCS resumable upload** — quản lý part, etag, retry.
+- **TUS protocol** — resume chuẩn hóa, nhiều client Uppy hỗ trợ.
+
+---
+
+## Tài liệu tham khảo
+
+- [MDN — Using readable streams](https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams)
+- [WhatWG Streams](https://streams.spec.whatwg.org/)
+
+---
+
+_Tài liệu này mô tả pattern tổng quát; khi tích hợp vào repo Nuxt, cần bổ sung auth, validation (zod), cleanup job và chiến lược lưu trữ production._

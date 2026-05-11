@@ -1,11 +1,69 @@
+---
+title: Introduction
+description: "Tài liệu kỹ thuật cá nhân: Nuxt, kiến trúc SSR/backend, case studies, persistent storage và GitLab CI/CD — xây dựng bằng Nextra."
+---
+
 # Introduction
- 
-Welcome to Nextra! This is a basic docs template. You can use it as a starting point for your own project :)
 
-## What is Nextra?
+Đây là **bộ tài liệu kỹ thuật** (knowledge base) tổng hợp ghi chép, hướng dẫn và cheat sheet cho phát triển ứng dụng web — trọng tâm là **Nuxt** và các chủ đề liên quan (SSR, Nitro, DevOps). Site được tạo bằng **[Nextra](https://nextra.site)** trên **Next.js**, dùng theme **nextra-theme-docs** để có sidebar, search và bố cục tài liệu nhất quán.
 
-A **simple**, **powerful** and **flexible** site generation framework with everything you love from Next.js.
+Bạn có thể **điều hướng theo menu bên trái**; các mục chính khớp với cấu trúc thư mục trong `pages/`.
 
-## Documentation
+---
 
-The documentation is available at [https://nextra.site](https://nextra.site).
+## Nội dung trong menu
+
+### [Mastering Nuxt](/mastering-nuxt/setup-ideal-extensions)
+
+Các bài theo hướng **học & thực hành** với Nuxt:
+
+- [Setup môi trường Nuxt với VS Code Extensions](/mastering-nuxt/setup-ideal-extensions)
+- [Nuxt Persistent Storage Guide](/mastering-nuxt/persistent-storage-guide) — client storage, cookie, Nitro `useStorage`, database
+
+### [Nuxt Architecture](/nuxt-architecture/nuxt-ssr-lifecycle)
+
+Tài liệu **kiến trúc & luồng chạy**:
+
+- [Nuxt 3 SSR – Lifecycle & Execution Order](/nuxt-architecture/nuxt-ssr-lifecycle)
+- [Nuxt 3 SSR – When to use what](/nuxt-architecture/nuxt-ssr-when-to-use-what)
+- [Nitro and H3 — Nuxt's Backend Architecture](/nuxt-architecture/nuxt-nitro-h3)
+- [How a Request Reaches the Server in Nuxt](/nuxt-architecture/nuxt-client-server-request-flow) — CSR/SSR, headers, IP forwarding
+
+### [Gitlab CI/CD](/gitlab-cicd/introduction)
+
+Ghi chép và bài học liên quan **GitLab CI/CD** (từng section trong menu).
+
+### [Case studies](/case-studies)
+
+**Kinh nghiệm và bài học tích lũy** từ công việc: tình huống, cách tiếp cận, kết quả và rút kinh nghiệm (bắt đầu từ [Overview](/case-studies)).
+
+### Các trang khác
+
+- **Advanced** — ví dụ nội dung thử nghiệm trong theme (ví dụ Satori).
+- **About / Contact** — meta trang tĩnh theo cấu hình dự án.
+
+---
+
+## Cấu trúc thư mục (tóm tắt)
+
+```text
+pages/
+├── mastering-nuxt/      # Khóa học / hướng dẫn Nuxt
+├── nuxt-architecture/   # SSR, Nitro, H3, request flow
+├── case-studies/        # Case studies / kinh nghiệm tích lũy
+├── gitlab-cicd/         # CI/CD
+├── advanced/            # Thử nghiệm
+└── index.mdx            # Trang này
+```
+
+Mỗi thư mục con có **`_meta.ts`** điều khiển **nhãn hiển thị** trong sidebar của Nextra.
+
+---
+
+## Mục đích sử dụng
+
+- **Tra cứu nhanh** khi làm việc với Nuxt (lifecycle, storage, backend stack).
+- **Chia sẻ trong team** hoặc dùng làm **personal wiki**.
+- **Mở rộng** bằng cách thêm file `.mdx` mới và cập nhật `_meta.ts` tương ứng.
+
+Nếu bạn vừa vào đây lần đầu, nên bắt đầu từ **[Mastering Nuxt](/mastering-nuxt/setup-ideal-extensions)** hoặc **[Nuxt Architecture → SSR lifecycle](/nuxt-architecture/nuxt-ssr-lifecycle)** tùy nhu cầu.
