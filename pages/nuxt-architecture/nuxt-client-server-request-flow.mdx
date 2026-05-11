@@ -1,0 +1,613 @@
+---
+title: "How a Request Reaches the Server in Nuxt"
+description: "CSR vs SSR, IP and proxies, header forwarding, and useRequestHeaders() — from browser to Nitro and backend APIs."
+---
+
+# How a Request Originates from Client and Reaches the Server
+
+## Understanding CSR, SSR, IP Forwarding, and `useRequestHeaders()` in Nuxt
+
+---
+
+## 1. Introduction
+
+When building modern web applications with Nuxt, one of the most important concepts to understand is:
+
+> How does a request travel from the browser to the server?
+
+This becomes especially important when learning:
+
+- CSR (Client-Side Rendering)
+- SSR (Server-Side Rendering)
+- Authentication
+- Cookies
+- User IP detection
+- Proxy/CDN systems
+- `useRequestHeaders()`
+- Header forwarding
+
+Understanding the request lifecycle helps explain:
+
+- why `useRequestHeaders()` only works in SSR
+- why backend servers can still detect user IP
+- why forwarding headers is important
+- how Nuxt/Nitro acts like a gateway between client and backend APIs
+
+---
+
+## 2. Core Concepts
+
+---
+
+## What is a Request?
+
+A request is a message sent from a client (browser/app) to a server.
+
+Example:
+
+```http
+GET /profile HTTP/1.1
+Host: example.com
+Cookie: session=abc123
+User-Agent: Chrome
+```
+
+The request contains:
+
+- URL
+- headers
+- cookies
+- method
+- body
+- network metadata (source IP)
+
+---
+
+## What are Headers?
+
+Headers contain metadata about the request.
+
+Examples:
+
+```http
+Cookie: session=abc123
+User-Agent: Chrome
+Accept-Language: en
+Authorization: Bearer xxx
+```
+
+Some headers are added by:
+
+- browser
+- CDN
+- proxy
+- nginx
+- application server
+
+---
+
+## What is Source IP?
+
+Every internet request contains:
+
+- source IP
+- destination IP
+
+At the network layer:
+
+```txt
+Client IP -> Server IP
+```
+
+Even if frontend JavaScript cannot see the IP,
+the network request still contains it.
+
+---
+
+## 3. The Journey of a Request on the Internet
+
+---
+
+## High-Level Flow
+
+```txt
+User
+  ↓
+Browser
+  ↓
+DNS Lookup
+  ↓
+Internet Routing
+  ↓
+CDN / Proxy / Load Balancer
+  ↓
+Application Server
+  ↓
+Backend / Database
+```
+
+---
+
+## 4. CSR (Client-Side Rendering)
+
+---
+
+## Concept
+
+In CSR:
+
+- JavaScript runs in the browser
+- browser directly calls APIs
+- frontend and backend are separate
+
+---
+
+## CSR Flow Diagram
+
+```txt
+┌─────────┐
+│ Browser │
+└────┬────┘
+     │
+     │ fetch()/axios
+     │
+     │ Request:
+     │ - cookies
+     │ - auth token
+     │
+     ▼
+┌─────────────┐
+│ Backend API │
+└─────────────┘
+```
+
+---
+
+## Important Point
+
+In CSR:
+
+```ts
+useRequestHeaders();
+```
+
+returns:
+
+```ts
+{
+}
+```
+
+Why?
+
+Because:
+
+- browser JavaScript does NOT have access to the incoming raw HTTP request
+- there is no SSR request context
+
+---
+
+## But Backend Still Knows User IP
+
+Even though frontend JS cannot access the IP:
+
+```txt
+Browser JS ❌
+```
+
+the actual network request still contains:
+
+```txt
+source IP ✅
+```
+
+So backend servers can still detect:
+
+```txt
+1.2.3.4
+```
+
+from:
+
+- TCP connection
+- proxy headers
+- load balancer headers
+
+---
+
+## 5. SSR (Server-Side Rendering)
+
+---
+
+## Concept
+
+In SSR:
+
+- browser sends request to Nuxt server
+- Nuxt renders HTML on the server
+- Nuxt may call another backend API
+
+Nuxt becomes a middle layer.
+
+---
+
+## SSR Flow Diagram
+
+```txt
+┌─────────┐
+│ Browser │
+└────┬────┘
+     │
+     │ HTTP Request
+     │
+     │ headers:
+     │ - cookie
+     │ - user-agent
+     │ - x-forwarded-for
+     ▼
+┌────────────────────┐
+│ Nuxt Nitro Server  │
+│ SSR Context        │
+└────┬───────────────┘
+     │
+     │ useRequestHeaders()
+     │ reads incoming headers
+     ▼
+┌────────────────────┐
+│ useFetch / $fetch  │
+└────┬───────────────┘
+     │
+     │ forward headers
+     ▼
+┌────────────────────┐
+│ Backend API Server │
+└────────────────────┘
+```
+
+---
+
+## 6. What is `useRequestHeaders()`?
+
+---
+
+## Definition
+
+`useRequestHeaders()` is a Nuxt composable used to access the current incoming request headers during SSR.
+
+Example:
+
+```ts
+const headers = useRequestHeaders();
+```
+
+---
+
+## Internally
+
+It reads from the current H3 event:
+
+```ts
+event.node.req.headers;
+```
+
+---
+
+## Why It Only Works in SSR
+
+Because SSR has an actual incoming request:
+
+```txt
+Browser -> Nitro Server
+```
+
+Nuxt receives the request directly.
+
+So during SSR:
+
+```ts
+useRequestHeaders();
+```
+
+can read:
+
+- cookies
+- user-agent
+- forwarded IP
+- auth headers
+
+---
+
+## Why It Returns `{}` in CSR
+
+After hydration:
+
+```txt
+Browser JS Runtime
+```
+
+There is no incoming request anymore.
+
+So:
+
+```ts
+useRequestHeaders();
+```
+
+returns:
+
+```ts
+{
+}
+```
+
+---
+
+## 7. What is Header Forwarding?
+
+---
+
+## Concept
+
+Nuxt SSR often acts as:
+
+- gateway
+- BFF (Backend For Frontend)
+- proxy layer
+
+When Nuxt calls another backend,
+it may need to forward headers from the original user request.
+
+---
+
+## Example
+
+```txt
+User -> Nuxt -> Backend API
+```
+
+Without forwarding:
+
+```txt
+Backend only sees:
+Nuxt Server
+```
+
+With forwarding:
+
+```txt
+Backend sees:
+Original User Info
+```
+
+---
+
+## 8. Why Forward IP?
+
+---
+
+## Without Forwarding
+
+Flow:
+
+```txt
+User -> Nuxt -> Backend
+```
+
+Backend sees:
+
+```txt
+Request came from Nuxt server IP
+```
+
+because Nuxt made the request.
+
+---
+
+## With Forwarding
+
+Nuxt forwards:
+
+```http
+x-forwarded-for: 1.2.3.4
+```
+
+Now backend can identify:
+
+- original user IP
+- device
+- country
+- rate limits
+- abuse detection
+
+---
+
+## 9. Common Forwarded Headers
+
+---
+
+## IP Headers
+
+```http
+x-forwarded-for
+x-real-ip
+cf-connecting-ip
+```
+
+---
+
+## User Headers
+
+```http
+cookie
+authorization
+user-agent
+accept-language
+```
+
+---
+
+## 10. Example in Nuxt
+
+---
+
+## Forwarding User Headers
+
+```ts
+const headers = useRequestHeaders(["cookie", "user-agent", "x-forwarded-for"]);
+
+const data = await $fetch("https://api.example.com", {
+  headers,
+});
+```
+
+---
+
+## 11. Production Architecture
+
+---
+
+## Real-World Flow
+
+```txt
+User
+  ↓
+Cloudflare
+  ↓
+Nginx
+  ↓
+Nuxt Nitro
+  ↓
+Backend API
+```
+
+Each layer may append additional headers.
+
+Example:
+
+```http
+x-forwarded-for:
+1.2.3.4, cloudflare-ip, nginx-ip
+```
+
+---
+
+## 12. Why This Matters
+
+Understanding request flow helps explain:
+
+- SSR authentication
+- cookie forwarding
+- IP tracking
+- analytics
+- security
+- CDN behavior
+- proxy systems
+- rate limiting
+- geo detection
+
+---
+
+## 13. CSR vs SSR Comparison
+
+| Feature                        | CSR     | SSR |
+| ------------------------------ | ------- | --- |
+| Runs in browser                | ✅      | ❌  |
+| Has incoming request context   | ❌      | ✅  |
+| `useRequestHeaders()` works    | ❌      | ✅  |
+| Can read raw request headers   | ❌      | ✅  |
+| Can forward headers to backend | Limited | ✅  |
+| Backend can detect user IP     | ✅      | ✅  |
+| Direct browser → backend       | ✅      | ❌  |
+
+---
+
+## 14. Best Practices
+
+---
+
+## Use `useRequestHeaders()` Only in SSR
+
+```ts
+if (import.meta.server) {
+  const headers = useRequestHeaders();
+}
+```
+
+---
+
+## Forward Only Required Headers
+
+Avoid forwarding everything.
+
+Preferred:
+
+```ts
+useRequestHeaders(["cookie", "authorization", "x-forwarded-for"]);
+```
+
+---
+
+## Trust Proxy Carefully
+
+Never blindly trust:
+
+- `x-forwarded-for`
+- client-provided headers
+
+Use trusted proxy configuration.
+
+---
+
+## Use SSR for Authenticated APIs
+
+SSR is useful for:
+
+- protected pages
+- session auth
+- cookie-based auth
+- localization
+
+---
+
+## 15. Final Mental Model
+
+---
+
+## CSR
+
+```txt
+Browser JS directly calls backend
+```
+
+Frontend cannot see raw incoming request headers.
+
+---
+
+## SSR
+
+```txt
+Browser -> Nuxt Server -> Backend
+```
+
+Nuxt sits in the middle and can:
+
+- read headers
+- read cookies
+- detect forwarded IP
+- forward headers
+- act as a gateway
+
+---
+
+## 16. Key Takeaways
+
+- Every internet request contains a source IP
+- Frontend JS cannot access raw incoming request data
+- Backend servers can still detect user IP
+- `useRequestHeaders()` only works in SSR
+- SSR has access to the real incoming request
+- Nuxt often acts like a proxy/BFF
+- Forwarding headers preserves original user information
+- IP forwarding is important for security, auth, and analytics
+
+---
