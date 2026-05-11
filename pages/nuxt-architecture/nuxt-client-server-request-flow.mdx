@@ -5,7 +5,7 @@ description: "CSR vs SSR, IP and proxies, header forwarding, and useRequestHeade
 
 # How a Request Originates from Client and Reaches the Server
 
-## Understanding CSR, SSR, IP Forwarding, and `useRequestHeaders()` in Nuxt
+Understanding CSR, SSR, IP Forwarding, and `useRequestHeaders()` in Nuxt
 
 ---
 
@@ -154,6 +154,10 @@ In CSR:
      │ Request:
      │ - cookies
      │ - auth token
+     │ - user-agent
+     │ - accept-language
+     │ - x-forwarded-for
+     │ - ...
      │
      ▼
 ┌─────────────┐
@@ -244,20 +248,21 @@ Nuxt becomes a middle layer.
      │ - cookie
      │ - user-agent
      │ - x-forwarded-for
+     │ - ...
      ▼
 ┌────────────────────┐
 │ Nuxt Nitro Server  │
 │ SSR Context        │
 └────┬───────────────┘
      │
-     │ useRequestHeaders()
-     │ reads incoming headers
+     │ use useRequestHeaders()
+     │ to read incoming headers
      ▼
 ┌────────────────────┐
 │ useFetch / $fetch  │
 └────┬───────────────┘
-     │
-     │ forward headers
+     │ use $fetch()
+     │ to forward headers to backend
      ▼
 ┌────────────────────┐
 │ Backend API Server │
@@ -401,6 +406,50 @@ Request came from Nuxt server IP
 
 because Nuxt made the request.
 
+### Server → server (when Nitro calls your backend)
+
+During SSR, when Nitro runs `$fetch` / `useFetch` against your backend, that hop is **server → server**: the HTTP client is the **Nuxt/Nitro process**, not the user’s browser. At the TCP/IP level, the backend typically sees the **public / egress IP of the host (or platform) running Nitro**.
+
+**If you do not forward** the end user’s IP in a trusted header (for example `x-forwarded-for`, `x-real-ip`, `cf-connecting-ip`, possibly already normalized by your CDN / proxy in front of Nitro):
+
+- The backend **does not** see the user’s machine as the source of that server→server request; it sees the **Nuxt server (or egress) IP** instead of the user’s IP.
+- Geo, rate limiting, or audit keyed on “real client IP” will be **wrong** unless you forward deliberately and configure **trusted proxies** correctly.
+
+**Note:** The backend can still **identify the logged-in user** if you send **cookies**, **`Authorization`**, or session headers—this is **application identity**, separate from **the user’s network IP**.
+
+### Diagram — TCP source IP vs forwarded client IP
+
+**Without forwarding IP headers** — the server→server hop hides the user’s IP at the TCP layer:
+
+```txt
+  User browser                    Nitro (SSR host)
+  IP: U.U.U.U                      public IP: N.N.N.N
+      │                                  │
+      │  HTTP/HTTPS (page request)     │
+      └──────────────────────────────────►
+                                         │
+                           $fetch / useFetch
+                           (no X-Forwarded-For, etc.)
+                                         │
+                                         ▼
+                                 ┌───────────────┐
+                                 │  Backend API  │
+                                 └───────────────┘
+  Backend observes: incoming TCP peer ≈ N.N.N.N
+  (Nitro / platform egress — not U.U.U.U)
+```
+
+**With trusted forwarding** — TCP is still from Nitro, but the app can recover the user IP from headers:
+
+```txt
+  User (U.U.U.U) ──► Nitro (N.N.N.N) ──► Backend API
+                         │
+              $fetch + e.g. X-Forwarded-For: U.U.U.U
+                         │
+  Backend: TCP source still N.N.N.N
+           but application reads client IP from header ✅
+```
+
 ---
 
 ## With Forwarding
@@ -508,6 +557,23 @@ Understanding request flow helps explain:
 ---
 
 ## 13. CSR vs SSR Comparison
+
+### Diagram — who opens the TCP connection to the backend?
+
+```txt
+CSR (browser calls API directly)
+
+  Browser ──────────────────────► Backend API
+           TCP source = user (or user’s network)
+
+
+SSR (Nitro calls API during render)
+
+  Browser ──► Nitro ──► Backend API
+              │            ▲
+              └────────────┘
+           TCP source = Nitro unless you forward client IP in headers
+```
 
 | Feature                        | CSR     | SSR |
 | ------------------------------ | ------- | --- |
