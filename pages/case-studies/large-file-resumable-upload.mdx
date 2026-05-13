@@ -41,7 +41,7 @@ Các công nghệ và khái niệm được dùng xuyên suốt guide (phù hợ
 | **Stream (nền tảng)**    | **Web Streams** (khái niệm liên quan khi xử lý body dạng stream)                              | Đồng bộ mô hình luồng giữa client và server hiện đại.                                                       |
 | **Định danh & validate** | **UUID**, gợi ý **Zod**                                                                       | `uploadId`; validate body init (`fileSize`, `chunkSize`).                                                   |
 | **Lưu trữ & production** | **Disk temp**, gợi ý **S3 Multipart** / **GCS resumable**, **TUS**                            | Temp local cho ví dụ; object storage / protocol khi file cực lớn và cần SLA.                                |
-| **Tài liệu hóa luồng**   | **ASCII / text** trong fenced code block (`text`)                                             | Hiển thị trong mọi viewer Markdown; không phụ thuộc Mermaid.                                                |
+| **Tài liệu hóa luồng**   | **Mermaid** (khối fenced code với ngôn ngữ `mermaid`)                                         | Giữ đủ các bước như ASCII trước đây; diagram được render khi có JS (site dev/deploy).                       |
 
 Phần code trong guide là **minh họa**; production nên bổ sung **auth**, **rate limit**, **dọn session hết hạn** và chọn storage (local vs cloud) phù hợp SLA.
 
@@ -49,22 +49,24 @@ Phần code trong guide là **minh họa**; production nên bổ sung **auth**, 
 
 <span id="flow-system-view"></span>
 
-```text
-+----------------------------+       +----------------------------+
-| CLIENT                     |       | NITRO API                  |
-| slice + queued PUTs        |  -->  | stream handlers            |
-+----------------------------+       +----------------------------+
-              \         /
-               v       v
-+----------------------------+ +----------------------------+
-| TEMP *.part / index        | | METADATA uploadId          |
-| disk or object part        | | missing[], verify          |
-+----------------------------+ +----------------------------+
-               \       /
-                 v     v
-           +----------------------------+
-           | MERGED FILE -> URL/ID      |
-           +----------------------------+
+```mermaid
+flowchart TB
+  C["CLIENT<br/>slice + queued PUTs"]
+  N["NITRO API<br/>stream handlers"]
+
+  subgraph SV["Server: chunk lưu tạm & metadata"]
+    direction LR
+    T["TEMP<br/>*.part / index<br/>disk hoặc object"]
+    M["METADATA<br/>uploadId<br/>missing[], verify"]
+  end
+
+  R["MERGED FILE → URL/ID"]
+
+  C -->|"init + PUT từng chunk"| N
+  N -->|"stream → file .part"| T
+  N -->|"index đã nhận / verify"| M
+  T --> R
+  M --> R
 ```
 
 ---
@@ -112,14 +114,24 @@ Một HTTP request đẩy **toàn bộ** file chục GB sẽ gặp:
 
 <span id="flow-compare"></span>
 
-```text
-+----------------------------+   +----------------------------+
-| ONE big POST               |   | MANY chunks + session      |
-| long connection            |   | many short PUTs            |
-| drop -> restart            |   | retry one chunk            |
-| large RAM buffer           |   | RAM ~ one part buf         |
-| no resume id               |   | uploadId + missing         |
-+----------------------------+   +----------------------------+
+```mermaid
+flowchart LR
+  subgraph ONE["ONE big POST"]
+    direction TB
+    ONE_A["long connection"]
+    ONE_B["drop -> restart"]
+    ONE_C["large RAM buffer"]
+    ONE_D["no resume id"]
+    ONE_A --> ONE_B --> ONE_C --> ONE_D
+  end
+  subgraph MANY["MANY chunks + session"]
+    direction TB
+    MN_A["many short PUTs"]
+    MN_B["retry one chunk"]
+    MN_C["RAM ~ one part buf"]
+    MN_D["uploadId + missing"]
+    MN_A --> MN_B --> MN_C --> MN_D
+  end
 ```
 
 ---
@@ -150,54 +162,41 @@ Một HTTP request đẩy **toàn bộ** file chục GB sẽ gặp:
 
 <span id="flow-overall"></span>
 
-```text
-+----------------------------+
-| 1) POST /uploads (init)    |
-| uploadId + totalChunks     |
-+----------------------------+
-              v
-+----------------------------+
-| 2) PUT .../chunks/:i       |
-| slice; concurrency<=N      |
-+----------------------------+
-              v
-+----------------------------+
-| 3) stream -> tmp/*.part    |
-| store metadata per index   |
-+----------------------------+
-              v
-+----------------------------+
-| 4) POST .../complete       |
-+----------------------------+
-              v
-+----------------------------+
-| 5) ok: merge + URL         |
-| fail: 409 + missing[]      |
-+----------------------------+
+```mermaid
+flowchart TD
+  S1["1) POST /uploads (init)<br/>uploadId + totalChunks"]
+  S2["2) PUT .../chunks/:i<br/>slice; concurrency<=N"]
+  S3["3) stream → tmp/*.part<br/>store metadata per index"]
+  S4["4) POST .../complete"]
+  S5["5) ok: merge + URL<br/>fail: 409 + missing[]"]
+  S1 --> S2 --> S3 --> S4 --> S5
 ```
 
 #### Sequence: từ khởi tạo đến merge
 
 <span id="flow-sequence"></span>
 
-```text
-  | FE               | API              | TMP              | META             |
-  |                  |                  |                  |                  |
-  | POST /uploads    |                  |                  |                  |
-  |+---------------> |                  |+---------------> |                  |
-  |<- uploadId ----  |                  |                  |                  |
-  | totalChunks      |                  |                  |                  |
-  |                  |                  |                  |                  |
-  | (each index)     |                  |                  |                  |
-  | workers<=N       |                  |                  |                  |
-  |                  |                  |                  |                  |
-  | PUT :i ------->  |-- stream ------> | write .part      |                  |
-  |                  |+--- OK --------->|+---------------> |                  |
-  |<- 200 ---------- |                  |                  |                  |
-  |                  |                  |                  |                  |
-  | POST complete    |                  |                  |                  |
-  |+---------------> |+-- verify -------|+---------------> |                  |
-  |<- 409 / 200 ---- | merge if ok      |                  |                  |
+```mermaid
+sequenceDiagram
+  participant FE
+  participant API
+  participant TMP
+  participant META
+
+  FE->>API: POST /uploads
+  API->>META: create session
+  API-->>FE: uploadId, totalChunks
+
+  Note over FE,META: each chunk index — bounded worker concurrency (max N)
+
+  FE->>API: PUT .../chunks/:i
+  API->>TMP: stream → write .part
+  API->>META: mark index OK
+  API-->>FE: 200
+
+  FE->>API: POST .../complete
+  API->>META: verify + merge if ok
+  API-->>FE: 409 / 200
 ```
 
 ### Best practice
@@ -218,34 +217,26 @@ Một HTTP request đẩy **toàn bộ** file chục GB sẽ gặp:
 
 <span id="flow-frontend-queue"></span>
 
-```text
-+----------------------------+
-| input File, size S         |
-| chunk C; totalChunks       |
-+----------------------------+
-              v
-+----------------------------+
-| POST init -> uploadId      |
-| GET may -> missing[]       |
-+----------------------------+
-              v
-+----------------------------+
-| queue index list           |
-| workers take next idx      |
-+----------------------------+
-     |        |        |
-     v        v        v
-   +----+  +----+  +----+
-   | W1 |  | W2 |  | W3 |
-   +----+  +----+  +----+
-  workers<=N slice+PUT
-      \      |      /
-       \     v     /
-     all chunks ok
-              v
-+----------------------------+
-| POST .../complete          |
-+----------------------------+
+```mermaid
+flowchart TD
+  A["input File, size S<br/>chunk C; totalChunks"]
+  B["POST init → uploadId<br/>GET may → missing[]"]
+  C["queue index list<br/>workers take next idx"]
+  W1[W1]
+  W2[W2]
+  W3[W3]
+  D["workers<=N slice+PUT"]
+  E["all chunks ok"]
+  F["POST .../complete"]
+
+  A --> B --> C
+  C --> W1
+  C --> W2
+  C --> W3
+  W1 --> D
+  W2 --> D
+  W3 --> D
+  D --> E --> F
 ```
 
 ### Code (minh họa TypeScript)
@@ -322,49 +313,41 @@ export async function uploadLargeFile(
 
 <span id="flow-server-stream"></span>
 
-```text
-+----------------------------+
-| incoming HTTP body         |
-+----------------------------+
-         |                 |
-         v                 v
-+----------------------------+   +----------------------------+
-| WRONG: readBody all        |   | RIGHT: pipeline            |
-| big Buffer in RAM          |   | -> *.part stream           |
-+----------------------------+   +----------------------------+
-                   |
-                   v
-+----------------------------+
-| tmp/:uploadId/:i.part      |
-+----------------------------+
-                   v
-+----------------------------+
-| metadata: index received   |
-+----------------------------+
+```mermaid
+flowchart TD
+  IN["incoming HTTP body"]
+  subgraph WRONG["WRONG: readBody all"]
+    direction TB
+    W["big Buffer in RAM"]
+  end
+  subgraph RIGHT["RIGHT: pipeline"]
+    direction TB
+    R["→ *.part stream"]
+  end
+  PART["tmp/:uploadId/:i.part"]
+  META["metadata: index received"]
+
+  IN --> WRONG
+  IN --> RIGHT
+  RIGHT --> PART --> META
 ```
 
 #### Merge khi đủ chunk
 
 <span id="flow-merge"></span>
 
-```text
-+----------------------------+
-| POST .../complete          |
-+----------------------------+
-              v
-           /-----\
-          | ok?   |
-           \-----/
-         /         \
-        v           v
-+----------------------------+ +----------------------------+
-| merge parts 0..n-1         | | 409 + missing[]            |
-| verify + delete tmp        | | wait for chunks            |
-+----------------------------+ +----------------------------+
-        v
-+----------------------------+
-| 200 fileId / URL           |
-+----------------------------+
+```mermaid
+flowchart TD
+  C["POST .../complete"]
+  Q{ok?}
+  MERGE["merge parts 0..n-1<br/>verify + delete tmp"]
+  MISS["409 + missing[]<br/>wait for chunks"]
+  OK["200 fileId / URL"]
+
+  C --> Q
+  Q -->|yes| MERGE
+  Q -->|no| MISS
+  MERGE --> OK
 ```
 
 ### Code — minh họa merge tuần tự (Node)
@@ -420,30 +403,16 @@ Client lưu `uploadId` (ví dụ `localStorage` hoặc state app). Sau khi reloa
 
 <span id="flow-resume"></span>
 
-```text
-+----------------------------+
-| network / tab / 5xx        |
-+----------------------------+
-              v
-+----------------------------+
-| client keeps uploadId      |
-+----------------------------+
-              v
-+----------------------------+
-| GET /uploads/:id           |
-+----------------------------+
-              v
-+----------------------------+
-| server: uploaded/missing   |
-+----------------------------+
-              v
-+----------------------------+
-| PUT missing indexes only   |
-+----------------------------+
-              v
-+----------------------------+
-| POST complete when full    |
-+----------------------------+
+```mermaid
+flowchart TD
+  R1["network / tab / 5xx"]
+  R2["client keeps uploadId"]
+  R3["GET /uploads/:id"]
+  R4["server: uploaded/missing"]
+  R5["PUT missing indexes only"]
+  R6["POST complete when full"]
+
+  R1 --> R2 --> R3 --> R4 --> R5 --> R6
 ```
 
 ### Best practice
