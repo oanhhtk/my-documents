@@ -1,0 +1,8 @@
+/**
+ * @theguild/remark-mermaid (Nextra) SSR output is an empty <div /> until Mermaid
+ * runs on the client. Zero-height targets often never intersect the viewport for
+ * IntersectionObserver, so charts stay blank. Give placeholders a layout box.
+ */
+.nextra-content div:empty:has(+ hr) {
+  min-height: 4rem;
+}
