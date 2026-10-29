@@ -2,7 +2,10 @@ import React from "react";
 import { DocsThemeConfig } from "nextra-theme-docs";
 
 const config: DocsThemeConfig = {
-  // toc: { float: true },
+  toc: {
+    float: true,
+    title: "Mục lục",
+  },
   logo: <span>My Project</span>,
   project: {
     link: "https://github.com/shuding/nextra-docs-template",
